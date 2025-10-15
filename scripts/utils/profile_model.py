@@ -39,7 +39,7 @@ preprocess = transforms.Compose([
 print("  - Preprocessing pipeline defined.")
 
 # Point to the local dataset directory
-dataset_path = os.path.join("dataset", "imagenette2")
+dataset_path = os.path.join("data", "imagenette2")
 val_dataset_path = os.path.join(dataset_path, 'val')
 if not os.path.exists(val_dataset_path):
     raise FileNotFoundError(

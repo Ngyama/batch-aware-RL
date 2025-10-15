@@ -65,10 +65,51 @@ LEARNING_STARTS = 1000
 # SECTION 4: ENVIRONMENT DEFINITION (The "Game" Rules)
 # ================================================================
 # The number of features in our state vector.
-# [queue_length, time_since_oldest_task_arrival, time_to_nearest_deadline, edge_node_status]
-NUM_STATE_FEATURES = 4
+# [queue_length, time_to_nearest_deadline, time_since_oldest_task]
+NUM_STATE_FEATURES = 3
 
 # --- Action Space Definitions ---
-# These constants make the code in environment.py more readable.
+# Batch-aware action space:
+# Action 0: WAIT (do not dispatch)
+# Action 1-7: Dispatch batch of size [1, 2, 4, 8, 16, 32, 64]
 ACTION_WAIT = 0
-ACTION_DISPATCH = 1
+BATCH_SIZE_OPTIONS = [1, 2, 4, 8, 16, 32, 64]
+NUM_ACTIONS = len(BATCH_SIZE_OPTIONS) + 1  # +1 for WAIT action
+
+
+# ================================================================
+# SECTION 5: ADAS-SPECIFIC PARAMETERS
+# ================================================================
+# Dataset path for real data flow environment
+IMAGENETTE_PATH = "data/imagenette2"
+
+# Device for neural network inference (real environment only)
+INFERENCE_DEVICE = "cuda"  # or "cpu"
+
+# Task arrival mode: "poisson" or "fixed_rate"
+TASK_ARRIVAL_MODE = "poisson"  # Can be changed to "fixed_rate" for video stream simulation
+FIXED_FRAME_RATE = 30  # FPS for fixed_rate mode (ADAS camera simulation)
+
+
+# ================================================================
+# SECTION 6: REWARD FUNCTION PARAMETERS
+# ================================================================
+# Reward for successfully completing a task before deadline
+REWARD_TASK_SUCCESS = 2.0
+
+# Penalty for missing a task's deadline
+PENALTY_TASK_MISS = 10.0
+
+# Penalty for a task expiring in the queue
+PENALTY_QUEUE_EXPIRY = 15.0
+
+# Latency penalty coefficient (to minimize overall system latency)
+LATENCY_PENALTY_COEFF = 0.1
+
+# Batch efficiency bonus coefficient (encourage batching)
+BATCH_BONUS_COEFF = 0.5
+
+# Invalid action penalties
+PENALTY_EMPTY_QUEUE = 0.5
+PENALTY_NODE_BUSY = 1.0
+PENALTY_WAIT = 0.01  # Small penalty for waiting
