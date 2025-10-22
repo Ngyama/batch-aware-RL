@@ -8,7 +8,12 @@ Usage:
     python scripts/train_real.py
 """
 
+import sys
 import os
+
+# Add project root to Python path
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+
 import torch
 from stable_baselines3 import DQN
 from stable_baselines3.common.callbacks import BaseCallback
@@ -16,9 +21,6 @@ import numpy as np
 
 from src.environment_real import SchedulingEnvReal
 import src.constants as c
-
-torch.set_default_device('cpu')
-os.environ['CUDA_VISIBLE_DEVICES'] = ''
 
 
 class TrainingMonitorCallback(BaseCallback):
@@ -73,18 +75,15 @@ class TrainingMonitorCallback(BaseCallback):
 
 def main():
     print("="*70)
-    print("🚀 BATCH-AWARE RL SCHEDULER - REAL DATA TRAINING")
+    print("BATCH-AWARE RL SCHEDULER - REAL DATA TRAINING")
     print("="*70)
-    print("\n⚠️  Real data training is computationally intensive!")
-    print("   - Requires GPU for reasonable speed")
-    print("   - Training will be much slower than simulation")
     print(f"\nTotal Timesteps: {c.TOTAL_TIMESTEPS:,}")
     print(f"Inference Device: {c.INFERENCE_DEVICE}")
     print("="*70 + "\n")
     
     # Check CUDA availability
     if c.INFERENCE_DEVICE == "cuda" and not torch.cuda.is_available():
-        print("⚠️  WARNING: CUDA requested but not available!")
+        print("[WARNING] CUDA requested but not available!")
         response = input("   Continue with CPU? (y/n): ")
         if response.lower() != 'y':
             print("Exiting...")
@@ -95,19 +94,22 @@ def main():
     os.makedirs(results_path, exist_ok=True)
     
     # Create environment
-    print("🔧 Creating real data environment...")
+    print("[INIT] Creating real data environment...")
     try:
         env = SchedulingEnvReal()
     except Exception as e:
-        print(f"\n❌ Error creating environment: {e}")
+        print(f"\n[ERROR] Error creating environment: {e}")
         print("\nPossible issues:")
         print("  - Imagenette dataset not found")
         print("  - CUDA/PyTorch installation issues")
         return
     
-    print("\n✅ Environment created\n")
+    print("\n[√] Environment created\n")
     
     # Create DQN agent
+    # Use the same device as the environment to avoid CUDA compatibility issues
+    training_device = 'cuda' if c.INFERENCE_DEVICE == 'cuda' and torch.cuda.is_available() else 'cpu'
+    
     model = DQN(
         'MlpPolicy',
         env,
@@ -117,12 +119,12 @@ def main():
         gamma=c.GAMMA,
         verbose=1,
         tensorboard_log=os.path.join(results_path, "tensorboard"),
-        device='cpu'
+        device=training_device
     )
-    print("✅ DQN agent created\n")
+    print("[√] DQN agent created\n")
     
     print("="*70)
-    print("🎯 STARTING TRAINING (This will take a while...)")
+    print("STARTING TRAINING")
     print("="*70 + "\n")
     
     callback = TrainingMonitorCallback(check_freq=5, verbose=1)
@@ -134,17 +136,17 @@ def main():
             progress_bar=False
         )
         print("\n" + "="*70)
-        print("✅ TRAINING COMPLETED")
+        print("[DONE] TRAINING COMPLETED")
         print("="*70 + "\n")
     except KeyboardInterrupt:
-        print("\n⚠️  Training interrupted\n")
+        print("\n[WARNING] Training interrupted\n")
     except Exception as e:
-        print(f"\n❌ Error during training: {e}")
+        print(f"\n[ERROR] Error during training: {e}")
     
     # Save model
     model_save_path = os.path.join(results_path, f"dqn_real_{c.TOTAL_TIMESTEPS}_steps.zip")
     model.save(model_save_path)
-    print(f"💾 Model saved to: {model_save_path}")
+    print(f"[SAVED] Model saved to: {model_save_path}")
     
     # Save statistics
     stats_path = os.path.join(results_path, "training_stats.npz")
@@ -153,12 +155,12 @@ def main():
         episode_rewards=callback.episode_rewards,
         episode_lengths=callback.episode_lengths
     )
-    print(f"📊 Statistics saved to: {stats_path}")
+    print(f"[SAVED] Statistics saved to: {stats_path}")
     
     # Print summary
     if len(callback.episode_rewards) > 0:
         print("\n" + "="*70)
-        print("📈 TRAINING SUMMARY")
+        print("TRAINING SUMMARY")
         print("="*70)
         print(f"  Total Episodes: {len(callback.episode_rewards)}")
         print(f"  Mean Reward: {np.mean(callback.episode_rewards):.2f}")
@@ -173,7 +175,7 @@ def main():
         print("="*70 + "\n")
     
     env.close()
-    print("🏁 Training complete!")
+    print("[DONE] Training complete!")
 
 
 if __name__ == "__main__":

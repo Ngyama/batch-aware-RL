@@ -6,20 +6,25 @@ providing detailed performance metrics and comparisons with baseline strategies.
 
 Usage:
     # Evaluate simulation model
-    python evaluate.py --env sim --model results/simulation/dqn_sim_100000_steps.zip
+    python scripts/evaluate.py --env sim --model results/simulation/dqn_sim_100000_steps.zip
     
     # Evaluate real model
-    python evaluate.py --env real --model results/real/dqn_real_100000_steps.zip
+    python scripts/evaluate.py --env real --model results/real/dqn_real_100000_steps.zip
     
     # Compare with baselines
-    python evaluate.py --env sim --model results/simulation/dqn_sim_100000_steps.zip --compare-baselines
+    python scripts/evaluate.py --env sim --model results/simulation/dqn_sim_100000_steps.zip --compare-baselines
 """
+
+import sys
+import os
+
+# Add project root to Python path
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 import argparse
 import numpy as np
 import matplotlib.pyplot as plt
 import torch
-import os
 from stable_baselines3 import DQN
 
 from src.environment_sim import SchedulingEnvSim
@@ -121,7 +126,7 @@ def evaluate_policy(env, policy, num_episodes=10, max_steps_per_episode=1000, po
     episode_lengths = []
     episode_stats = []
     
-    print(f"\n🔍 Evaluating {policy_name}...")
+    print(f"\n[EVAL] Evaluating {policy_name}...")
     print(f"   Running {num_episodes} episodes...\n")
     
     for episode in range(num_episodes):
@@ -180,7 +185,7 @@ def evaluate_policy(env, policy, num_episodes=10, max_steps_per_episode=1000, po
     metrics['avg_latency'] = total_latency / max(1, total_completed)
     
     # Print summary
-    print(f"\n📊 {policy_name} Summary:")
+    print(f"\n[SUMMARY] {policy_name}:")
     print(f"   Mean Reward: {metrics['mean_reward']:.2f} ± {metrics['std_reward']:.2f}")
     print(f"   Success Rate: {metrics['success_rate']:.2f}%")
     print(f"   Avg Latency: {metrics['avg_latency']*1000:.2f}ms")
@@ -240,7 +245,7 @@ def plot_comparison(all_metrics, save_path=None):
     
     if save_path:
         plt.savefig(save_path, dpi=300, bbox_inches='tight')
-        print(f"\n📊 Comparison plot saved to: {save_path}")
+        print(f"\n[SAVED] Comparison plot saved to: {save_path}")
     
     plt.show()
 
@@ -261,7 +266,7 @@ def main():
     args = parser.parse_args()
     
     print("="*70)
-    print("📊 BATCH-AWARE RL SCHEDULER - EVALUATION")
+    print("BATCH-AWARE RL SCHEDULER - EVALUATION")
     print("="*70)
     print(f"\nConfiguration:")
     print(f"  Environment: {args.env}")
@@ -274,20 +279,20 @@ def main():
     os.makedirs(args.output_dir, exist_ok=True)
     
     # Create environment
-    print("🔧 Creating environment...")
+    print("[INIT] Creating environment...")
     if args.env == 'sim':
         env = SchedulingEnvSim()
     else:
         env = SchedulingEnvReal()
-    print("✅ Environment created!\n")
+    print("[OK] Environment created!\n")
     
     # Load trained model
-    print(f"🧠 Loading trained model from {args.model}...")
+    print(f"[LOAD] Loading trained model from {args.model}...")
     try:
         model = DQN.load(args.model, device='cpu')
-        print("✅ Model loaded successfully!\n")
+        print("[OK] Model loaded successfully!\n")
     except Exception as e:
-        print(f"❌ Error loading model: {e}")
+        print(f"[ERROR] Error loading model: {e}")
         return
     
     # Evaluate trained model
@@ -303,7 +308,7 @@ def main():
     # Evaluate baseline policies if requested
     if args.compare_baselines:
         print("\n" + "="*70)
-        print("📊 EVALUATING BASELINE POLICIES")
+        print("EVALUATING BASELINE POLICIES")
         print("="*70)
         
         baselines = [
@@ -323,7 +328,7 @@ def main():
     
     # Print final comparison
     print("\n" + "="*70)
-    print("📈 FINAL COMPARISON")
+    print("FINAL COMPARISON")
     print("="*70)
     print(f"{'Policy':<25} {'Mean Reward':<15} {'Success Rate':<15} {'Avg Latency (ms)':<18}")
     print("-"*70)
@@ -337,7 +342,7 @@ def main():
     # Save metrics
     metrics_path = os.path.join(args.output_dir, f"evaluation_metrics_{args.env}.npz")
     np.savez(metrics_path, metrics=all_metrics)
-    print(f"💾 Metrics saved to: {metrics_path}")
+    print(f"[SAVED] Metrics saved to: {metrics_path}")
     
     # Plot comparison if baselines were evaluated
     if args.compare_baselines:
@@ -346,7 +351,7 @@ def main():
     
     # Clean up
     env.close()
-    print("\n🏁 Evaluation complete!")
+    print("\n[DONE] Evaluation complete!")
 
 
 if __name__ == "__main__":

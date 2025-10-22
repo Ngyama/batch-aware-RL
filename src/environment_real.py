@@ -40,7 +40,7 @@ class SchedulingEnvReal(gym.Env):
         self.observation_space = spaces.Box(low, high, dtype=np.float32)
         
         # Setup neural network model and dataset
-        print("🔧 Initializing Real Environment...")
+        print("[INIT] Initializing Real Environment...")
         
         self.device = torch.device(c.INFERENCE_DEVICE if torch.cuda.is_available() else "cpu")
         print(f"  - Using device: {self.device}")
@@ -83,7 +83,7 @@ class SchedulingEnvReal(gym.Env):
                     _ = self.model(dummy_input)
             torch.cuda.synchronize()
         
-        print("✅ Real Environment initialized successfully!")
+        print("[√] Real Environment initialized successfully!")
         
         # Initialize simulation state
         self.current_time = 0.0
@@ -299,10 +299,18 @@ class SchedulingEnvReal(gym.Env):
             self.data_iterator = iter(self.data_loader)
             image, label = next(self.data_iterator)
         
+        # Calculate deadline based on mode
+        if hasattr(c, 'TASK_DEADLINE_MODE') and c.TASK_DEADLINE_MODE == "random":
+            # Random deadline: simulates heterogeneous task urgency
+            deadline_duration = random.uniform(c.TASK_DEADLINE_MIN, c.TASK_DEADLINE_MAX)
+        else:
+            # Fixed deadline
+            deadline_duration = c.TASK_DEADLINE_SECONDS
+        
         # Create task with real image data
         new_task = {
             'arrival_time': self.current_time,
-            'deadline': self.current_time + c.TASK_DEADLINE_SECONDS,
+            'deadline': self.current_time + deadline_duration,
             'task_id': self.stats['total_tasks_arrived'],
             'image': image,  # Actual image tensor
             'label': label   # Ground truth label

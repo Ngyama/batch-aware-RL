@@ -210,9 +210,17 @@ class SchedulingEnvSim(gym.Env):
 
     def _add_new_task(self):
         """Add a new task to the queue."""
+        # Calculate deadline based on mode
+        if hasattr(c, 'TASK_DEADLINE_MODE') and c.TASK_DEADLINE_MODE == "random":
+            # Random deadline: simulates heterogeneous task urgency
+            deadline_duration = random.uniform(c.TASK_DEADLINE_MIN, c.TASK_DEADLINE_MAX)
+        else:
+            # Fixed deadline
+            deadline_duration = c.TASK_DEADLINE_SECONDS
+        
         new_task = {
             'arrival_time': self.current_time,
-            'deadline': self.current_time + c.TASK_DEADLINE_SECONDS,
+            'deadline': self.current_time + deadline_duration,
             'task_id': self.stats['total_tasks_arrived']
         }
         self.task_queue.append(new_task)

@@ -11,7 +11,7 @@ import glob
 import numpy as np
 import json
 
-print("✅ Phase 1: Setup")
+print("[Phase 1] Setup")
 # Set the device to use for computation (GPU if available)
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 print(f"  - Using device: {device}")
@@ -28,7 +28,7 @@ print("-" * 50)
 # ================================================================
 # Phase 2: Data Processing
 # ================================================================
-print("✅ Phase 2: Data Processing")
+print("[Phase 2] Data Processing")
 # Define the standard image preprocessing pipeline
 preprocess = transforms.Compose([
     transforms.Resize(256),
@@ -56,7 +56,7 @@ print("-" * 50)
 # ================================================================
 # Phase 3 & 4: Core Profiling and Finalization
 # ================================================================
-print("✅ Phase 3 & 4: Starting Performance Profiling (Latency only)...")
+print("[Phase 3-4] Starting Performance Profiling (Latency only)...")
 batch_sizes_to_test = [1, 2, 4, 8, 16, 32, 64]
 results = {}
 print(f"  - Will test for Batch Sizes: {batch_sizes_to_test}")

@@ -30,11 +30,27 @@ PERFORMANCE_PROFILE = {
 # Average time (in seconds) between the arrival of two consecutive tasks.
 # For example, 0.05 means a new task arrives on average every 50ms.
 # This simulates the load on the system. A smaller value means higher load.
-TASK_ARRIVAL_INTERVAL_SECONDS = 0.05
 
-# The lifespan (in seconds) of a task after it arrives.
-# If a task is not completed by arrival_time + deadline, it is considered failed.
-TASK_DEADLINE_SECONDS = 1.0
+# --- LOW LOAD SCENARIO (Original Configuration) ---
+# Suitable for: sparse task arrivals, baseline testing
+# TASK_ARRIVAL_INTERVAL_SECONDS = 0.05  # 50ms average interval
+# TASK_DEADLINE_SECONDS = 1.0           # 1000ms deadline (very relaxed)
+
+# --- HIGH LOAD SCENARIO (Multi-sensor ADAS) ---
+# Suitable for: dense task arrivals, batch scheduling benefits
+# Simulates multiple sensors (cameras, radar, lidar) triggering simultaneously
+TASK_ARRIVAL_INTERVAL_SECONDS = 0.005  # 5ms average interval (10x higher load)
+
+# Deadline options:
+# Option 1: Fixed deadline (simpler, good for initial testing)
+TASK_DEADLINE_SECONDS = 0.03           # 30ms deadline (6x task interval, moderate pressure)
+
+# Option 2: Random deadline (more realistic, uncomment to use)
+# Will be implemented in environment as: random.uniform(0.02, 0.05)
+# This creates task heterogeneity: urgent tasks (20ms) vs relaxed tasks (50ms)
+TASK_DEADLINE_MODE = "fixed"           # "fixed" or "random"
+TASK_DEADLINE_MIN = 0.02               # Min deadline for random mode (20ms)
+TASK_DEADLINE_MAX = 0.05               # Max deadline for random mode (50ms)
 
 # How much simulation time (in seconds) passes in a single step of the environment.
 # This defines the time resolution of our simulation.
@@ -84,7 +100,8 @@ NUM_ACTIONS = len(BATCH_SIZE_OPTIONS) + 1  # +1 for WAIT action
 IMAGENETTE_PATH = "data/imagenette2"
 
 # Device for neural network inference (real environment only)
-INFERENCE_DEVICE = "cuda"  # or "cpu"
+# NOTE: Set to "cpu" if you have GPU compatibility issues (e.g., RTX 50-series)
+INFERENCE_DEVICE = "cuda"  # "cuda" for GPU, "cpu" for CPU-only
 
 # Task arrival mode: "poisson" or "fixed_rate"
 TASK_ARRIVAL_MODE = "poisson"  # Can be changed to "fixed_rate" for video stream simulation
@@ -104,9 +121,13 @@ PENALTY_TASK_MISS = 10.0
 PENALTY_QUEUE_EXPIRY = 15.0
 
 # Latency penalty coefficient (to minimize overall system latency)
-LATENCY_PENALTY_COEFF = 0.1
+# --- For LOW LOAD: use 0.1 (less important)
+# --- For HIGH LOAD: use 0.3 (more important to optimize latency)
+LATENCY_PENALTY_COEFF = 0.3  # Increased for high-load scenario
 
 # Batch efficiency bonus coefficient (encourage batching)
+# --- For LOW LOAD: 0.5 may cause excessive waiting
+# --- For HIGH LOAD: 0.5 is good (batching has real benefits)
 BATCH_BONUS_COEFF = 0.5
 
 # Invalid action penalties

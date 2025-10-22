@@ -7,7 +7,12 @@ Usage:
     python scripts/train_sim.py
 """
 
+import sys
 import os
+
+# Add project root to Python path
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+
 import torch
 from stable_baselines3 import DQN
 from stable_baselines3.common.callbacks import BaseCallback
@@ -54,7 +59,7 @@ class TrainingMonitorCallback(BaseCallback):
 
 def main():
     print("="*70)
-    print("🚀 BATCH-AWARE RL SCHEDULER - SIMULATION TRAINING")
+    print("BATCH-AWARE RL SCHEDULER - SIMULATION TRAINING")
     print("="*70)
     print(f"\nTotal Timesteps: {c.TOTAL_TIMESTEPS:,}")
     print(f"Learning Rate: {c.LEARNING_RATE}")
@@ -65,7 +70,7 @@ def main():
     os.makedirs(results_path, exist_ok=True)
     
     env = SchedulingEnvSim()
-    print("✅ Environment created\n")
+    print("[OK] Environment created\n")
     
     model = DQN(
         'MlpPolicy',
@@ -78,10 +83,10 @@ def main():
         tensorboard_log=os.path.join(results_path, "tensorboard"),
         device='cpu'
     )
-    print("✅ DQN agent created\n")
+    print("[OK] DQN agent created\n")
     
     print("="*70)
-    print("🎯 STARTING TRAINING")
+    print("STARTING TRAINING")
     print("="*70 + "\n")
     
     callback = TrainingMonitorCallback(check_freq=10, verbose=1)
@@ -93,14 +98,14 @@ def main():
             progress_bar=False
         )
         print("\n" + "="*70)
-        print("✅ TRAINING COMPLETED")
+        print("[DONE] TRAINING COMPLETED")
         print("="*70 + "\n")
     except KeyboardInterrupt:
-        print("\n⚠️  Training interrupted\n")
+        print("\n[WARNING] Training interrupted\n")
     
     model_save_path = os.path.join(results_path, f"dqn_sim_{c.TOTAL_TIMESTEPS}_steps.zip")
     model.save(model_save_path)
-    print(f"💾 Model saved to: {model_save_path}")
+    print(f"[SAVED] Model saved to: {model_save_path}")
     
     stats_path = os.path.join(results_path, "training_stats.npz")
     np.savez(
@@ -108,11 +113,11 @@ def main():
         episode_rewards=callback.episode_rewards,
         episode_lengths=callback.episode_lengths
     )
-    print(f"📊 Statistics saved to: {stats_path}")
+    print(f"[SAVED] Statistics saved to: {stats_path}")
     
     if len(callback.episode_rewards) > 0:
         print("\n" + "="*70)
-        print("📈 TRAINING SUMMARY")
+        print("TRAINING SUMMARY")
         print("="*70)
         print(f"  Total Episodes: {len(callback.episode_rewards)}")
         print(f"  Mean Reward: {np.mean(callback.episode_rewards):.2f}")
@@ -120,7 +125,7 @@ def main():
         print("="*70 + "\n")
     
     env.close()
-    print("🏁 Training complete!")
+    print("[DONE] Training complete!")
 
 
 if __name__ == "__main__":
