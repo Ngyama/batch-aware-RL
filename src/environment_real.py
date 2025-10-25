@@ -35,8 +35,9 @@ class SchedulingEnvReal(gym.Env):
         # Define action and observation spaces
         self.action_space = spaces.Discrete(c.NUM_ACTIONS)
         
-        low = np.array([0, 0, 0], dtype=np.float32)
-        high = np.array([np.inf, np.inf, np.inf], dtype=np.float32)
+        # Enhanced 9-dimensional state space
+        low = np.array([0] * c.NUM_STATE_FEATURES, dtype=np.float32)
+        high = np.array([np.inf] * c.NUM_STATE_FEATURES, dtype=np.float32)
         self.observation_space = spaces.Box(low, high, dtype=np.float32)
         
         # Setup neural network model and dataset
@@ -99,6 +100,10 @@ class SchedulingEnvReal(gym.Env):
             'total_inference_time': 0.0
         }
         
+        # History tracking for enhanced state features
+        self.recent_queue_lengths = collections.deque(maxlen=c.HISTORY_WINDOW_SIZE)
+        self.recent_dispatches = collections.deque(maxlen=c.HISTORY_WINDOW_SIZE)  # (num_success, num_total)
+        
         self._schedule_next_task_arrival()
 
     def reset(self, seed=None, options=None):
@@ -116,6 +121,10 @@ class SchedulingEnvReal(gym.Env):
             'total_latency': 0.0,
             'total_inference_time': 0.0
         }
+        
+        # Reset history tracking
+        self.recent_queue_lengths.clear()
+        self.recent_dispatches.clear()
         
         self.data_iterator = iter(self.data_loader)
         self._schedule_next_task_arrival()
@@ -162,6 +171,9 @@ class SchedulingEnvReal(gym.Env):
         # Check for expired tasks
         expired_penalty = self._remove_expired_tasks()
         reward -= expired_penalty
+        
+        # Update history tracking for enhanced state features
+        self.recent_queue_lengths.append(len(self.task_queue))
         
         # Prepare return values
         next_state = self._get_state()
@@ -233,6 +245,7 @@ class SchedulingEnvReal(gym.Env):
         3. Batch efficiency bonus (encourage appropriate batching)
         """
         reward = 0.0
+        num_success = 0
         
         for task in batch_tasks:
             task_latency = completion_time - task['arrival_time']
@@ -242,9 +255,13 @@ class SchedulingEnvReal(gym.Env):
                 self.stats['total_tasks_completed'] += 1
                 reward -= task_latency * c.LATENCY_PENALTY_COEFF
                 self.stats['total_latency'] += task_latency
+                num_success += 1
             else:
                 reward -= c.PENALTY_TASK_MISS
                 self.stats['total_tasks_failed'] += 1
+        
+        # Track dispatch success for history
+        self.recent_dispatches.append((num_success, batch_size))
         
         # Batch efficiency bonus
         if batch_size > 1:
@@ -256,11 +273,20 @@ class SchedulingEnvReal(gym.Env):
         """
         Get current state observation.
         
-        Returns:
-            State vector: [queue_length, time_to_nearest_deadline, time_since_oldest_task]
+        Returns enhanced 9-dimensional state vector:
+            [0] queue_length: Current number of tasks in queue
+            [1] time_to_nearest_deadline: Time until most urgent task's deadline (seconds)
+            [2] time_since_oldest_task: How long the oldest task has been waiting (seconds)
+            [3] ratio_urgent_tasks: Fraction of tasks with deadline < 10ms
+            [4] ratio_medium_tasks: Fraction of tasks with deadline 10-30ms
+            [5] ratio_relaxed_tasks: Fraction of tasks with deadline > 30ms
+            [6] time_until_node_free: How long until edge node finishes current batch (seconds)
+            [7] avg_queue_length_recent: Average queue length over last N steps
+            [8] recent_success_rate: Success rate of last N dispatches
         """
         queue_length = len(self.task_queue)
         
+        # Features 0-2: Basic queue state (original features)
         if queue_length == 0:
             time_to_nearest_deadline = c.TASK_DEADLINE_SECONDS
             time_since_oldest_task = 0.0
@@ -271,10 +297,49 @@ class SchedulingEnvReal(gym.Env):
             oldest_task = self.task_queue[0]
             time_since_oldest_task = self.current_time - oldest_task['arrival_time']
         
+        # Features 3-5: Task urgency distribution
+        if queue_length == 0:
+            ratio_urgent = 0.0
+            ratio_medium = 0.0
+            ratio_relaxed = 0.0
+        else:
+            num_urgent = sum(1 for task in self.task_queue 
+                           if (task['deadline'] - self.current_time) < c.URGENT_THRESHOLD)
+            num_medium = sum(1 for task in self.task_queue 
+                           if c.MEDIUM_THRESHOLD_LOW <= (task['deadline'] - self.current_time) < c.MEDIUM_THRESHOLD_HIGH)
+            num_relaxed = queue_length - num_urgent - num_medium
+            
+            ratio_urgent = num_urgent / queue_length
+            ratio_medium = num_medium / queue_length
+            ratio_relaxed = num_relaxed / queue_length
+        
+        # Feature 6: Node availability
+        time_until_node_free = max(0.0, self.edge_node['free_at_time'] - self.current_time)
+        
+        # Feature 7: Recent average queue length
+        if len(self.recent_queue_lengths) == 0:
+            avg_queue_length_recent = queue_length
+        else:
+            avg_queue_length_recent = np.mean(self.recent_queue_lengths)
+        
+        # Feature 8: Recent success rate
+        if len(self.recent_dispatches) == 0:
+            recent_success_rate = 1.0  # Assume 100% at start
+        else:
+            total_success = sum(success for success, _ in self.recent_dispatches)
+            total_tasks = sum(total for _, total in self.recent_dispatches)
+            recent_success_rate = total_success / total_tasks if total_tasks > 0 else 1.0
+        
         return np.array([
             queue_length,
             time_to_nearest_deadline,
-            time_since_oldest_task
+            time_since_oldest_task,
+            ratio_urgent,
+            ratio_medium,
+            ratio_relaxed,
+            time_until_node_free,
+            avg_queue_length_recent,
+            recent_success_rate
         ], dtype=np.float32)
 
     def _schedule_next_task_arrival(self):

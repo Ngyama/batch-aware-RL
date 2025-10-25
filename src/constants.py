@@ -81,8 +81,11 @@ LEARNING_STARTS = 1000
 # SECTION 4: ENVIRONMENT DEFINITION (The "Game" Rules)
 # ================================================================
 # The number of features in our state vector.
-# [queue_length, time_to_nearest_deadline, time_since_oldest_task]
-NUM_STATE_FEATURES = 3
+# Enhanced 9-dimensional state space:
+# [queue_length, time_to_nearest_deadline, time_since_oldest_task,
+#  ratio_urgent_tasks, ratio_medium_tasks, ratio_relaxed_tasks,
+#  time_until_node_free, avg_queue_length_recent, recent_success_rate]
+NUM_STATE_FEATURES = 9
 
 # --- Action Space Definitions ---
 # Batch-aware action space:
@@ -134,3 +137,16 @@ BATCH_BONUS_COEFF = 0.5
 PENALTY_EMPTY_QUEUE = 0.5
 PENALTY_NODE_BUSY = 1.0
 PENALTY_WAIT = 0.01  # Small penalty for waiting
+
+
+# ================================================================
+# SECTION 7: ENHANCED STATE SPACE PARAMETERS
+# ================================================================
+# Window size for calculating recent statistics (in number of steps)
+HISTORY_WINDOW_SIZE = 10
+
+# Thresholds for task urgency classification (in seconds)
+URGENT_THRESHOLD = 0.01      # Tasks with deadline < 10ms are "urgent"
+MEDIUM_THRESHOLD_LOW = 0.01  # Lower bound for medium urgency
+MEDIUM_THRESHOLD_HIGH = 0.03 # Upper bound for medium urgency (30ms)
+# Tasks with deadline > 30ms are considered "relaxed"
