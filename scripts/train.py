@@ -1,11 +1,11 @@
 """
-Training Script for Real Data Environment
+Training Script for Batch-Aware RL Scheduler
 
-Trains RL agent using real environment with actual image processing.
-Training is slower but provides realistic performance evaluation.
+Trains RL agent using real environment with actual ResNet-18 image processing.
+Training uses GPU inference for realistic performance evaluation.
 
 Usage:
-    python scripts/train_real.py
+    python scripts/train.py
 """
 
 import sys

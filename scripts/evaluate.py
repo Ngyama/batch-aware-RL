@@ -1,18 +1,15 @@
 """
 Evaluation Script for Batch-Aware RL Scheduler
 
-This script evaluates trained models on both simulation and real environments,
+This script evaluates trained models on the real environment,
 providing detailed performance metrics and comparisons with baseline strategies.
 
 Usage:
-    # Evaluate simulation model
-    python scripts/evaluate.py --env sim --model results/simulation/dqn_sim_100000_steps.zip
-    
     # Evaluate real model
-    python scripts/evaluate.py --env real --model results/real/dqn_real_100000_steps.zip
+    python scripts/evaluate.py --model results/real/dqn_real_100000_steps.zip
     
     # Compare with baselines
-    python scripts/evaluate.py --env sim --model results/simulation/dqn_sim_100000_steps.zip --compare-baselines
+    python scripts/evaluate.py --model results/real/dqn_real_100000_steps.zip --compare-baselines
 """
 
 import sys
@@ -27,13 +24,8 @@ import matplotlib.pyplot as plt
 import torch
 from stable_baselines3 import DQN
 
-from src.environment_sim import SchedulingEnvSim
 from src.environment_real import SchedulingEnvReal
 import src.constants as c
-
-# Force CPU usage to avoid CUDA compatibility issues
-torch.set_default_device('cpu')
-os.environ['CUDA_VISIBLE_DEVICES'] = ''
 
 
 class BaselinePolicy:
@@ -252,8 +244,6 @@ def plot_comparison(all_metrics, save_path=None):
 
 def main():
     parser = argparse.ArgumentParser(description='Evaluate Batch-Aware RL Scheduler')
-    parser.add_argument('--env', type=str, required=True, choices=['sim', 'real'],
-                       help='Environment type: sim (simulation) or real')
     parser.add_argument('--model', type=str, required=True,
                        help='Path to trained model (.zip file)')
     parser.add_argument('--episodes', type=int, default=10,
@@ -269,7 +259,6 @@ def main():
     print("BATCH-AWARE RL SCHEDULER - EVALUATION")
     print("="*70)
     print(f"\nConfiguration:")
-    print(f"  Environment: {args.env}")
     print(f"  Model: {args.model}")
     print(f"  Episodes: {args.episodes}")
     print(f"  Compare Baselines: {args.compare_baselines}")
@@ -280,16 +269,13 @@ def main():
     
     # Create environment
     print("[INIT] Creating environment...")
-    if args.env == 'sim':
-        env = SchedulingEnvSim()
-    else:
-        env = SchedulingEnvReal()
+    env = SchedulingEnvReal()
     print("[OK] Environment created!\n")
     
     # Load trained model
     print(f"[LOAD] Loading trained model from {args.model}...")
     try:
-        model = DQN.load(args.model, device='cpu')
+        model = DQN.load(args.model, device='auto')
         print("[OK] Model loaded successfully!\n")
     except Exception as e:
         print(f"[ERROR] Error loading model: {e}")
@@ -340,13 +326,13 @@ def main():
     print("="*70 + "\n")
     
     # Save metrics
-    metrics_path = os.path.join(args.output_dir, f"evaluation_metrics_{args.env}.npz")
+    metrics_path = os.path.join(args.output_dir, "evaluation_metrics_real.npz")
     np.savez(metrics_path, metrics=all_metrics)
     print(f"[SAVED] Metrics saved to: {metrics_path}")
     
     # Plot comparison if baselines were evaluated
     if args.compare_baselines:
-        plot_path = os.path.join(args.output_dir, f"comparison_{args.env}.png")
+        plot_path = os.path.join(args.output_dir, "comparison_real.png")
         plot_comparison(all_metrics, save_path=plot_path)
     
     # Clean up

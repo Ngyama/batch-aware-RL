@@ -1,8 +1,8 @@
 """
-Quick Test Script for Both Environments
+Quick Test Script for Real Environment
 
-This script runs a quick sanity check on both simulation and real environments
-to ensure they are working correctly before training.
+This script runs a quick sanity check on the real environment
+to ensure it is working correctly before training.
 
 Usage:
     python tests/test_environments.py
@@ -15,68 +15,8 @@ import os
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 import numpy as np
-from src.environment_sim import SchedulingEnvSim
 from src.environment_real import SchedulingEnvReal
 import src.constants as c
-
-
-def test_simulation_env():
-    """Test the simulation environment."""
-    print("="*70)
-    print("Testing Simulation Environment (Scheme A)")
-    print("="*70 + "\n")
-    
-    try:
-        # Create environment
-        print("1. Creating environment...")
-        env = SchedulingEnvSim()
-        print("   [OK] Environment created\n")
-        
-        # Test reset
-        print("2. Testing reset()...")
-        state, info = env.reset()
-        print(f"   [OK] Initial state: {state}")
-        print(f"   [OK] State shape: {state.shape}")
-        assert state.shape == (c.NUM_STATE_FEATURES,), "State shape mismatch!"
-        print()
-        
-        # Test action space
-        print("3. Testing action space...")
-        print(f"   [OK] Action space: Discrete({env.action_space.n})")
-        assert env.action_space.n == c.NUM_ACTIONS, "Action space size mismatch!"
-        print()
-        
-        # Test a few steps
-        print("4. Running 20 test steps...")
-        for i in range(20):
-            # Random action
-            action = env.action_space.sample()
-            state, reward, terminated, truncated, info = env.step(action)
-            
-            if terminated or truncated:
-                print(f"   Episode ended at step {i+1}")
-                state, info = env.reset()
-            
-            if (i + 1) % 5 == 0:
-                print(f"   Step {i+1}: State={state}, Reward={reward:.2f}")
-        
-        print("   [OK] Steps executed successfully\n")
-        
-        # Test render
-        print("5. Testing render()...")
-        env.render()
-        print()
-        
-        # Close
-        env.close()
-        print("[PASS] SIMULATION ENVIRONMENT TEST PASSED!\n")
-        return True
-        
-    except Exception as e:
-        print(f"[FAIL] SIMULATION ENVIRONMENT TEST FAILED: {e}\n")
-        import traceback
-        traceback.print_exc()
-        return False
 
 
 def test_real_env():
@@ -154,46 +94,31 @@ def main():
     print("BATCH-AWARE RL SCHEDULER - ENVIRONMENT TESTS")
     print("="*70 + "\n")
     
-    # Test simulation environment
-    sim_passed = test_simulation_env()
-    
-    # Ask before testing real environment (it's slower)
-    print("="*70)
-    print("The real environment test will:")
+    print("[INFO] The real environment test will:")
     print("  - Load ResNet-18 model (~50MB)")
     print("  - Load Imagenette dataset")
     print("  - Run actual neural network inference")
     print("  - Take 1-2 minutes to complete")
     print("="*70 + "\n")
     
-    response = input("Do you want to test the real environment? (y/n): ")
-    
-    if response.lower() == 'y':
-        print()
-        real_passed = test_real_env()
-    else:
-        print("\n[SKIP] Skipping real environment test.\n")
-        real_passed = None
+    # Test real environment
+    real_passed = test_real_env()
     
     # Summary
     print("="*70)
     print("TEST SUMMARY")
     print("="*70)
-    print(f"  Simulation Environment: {'[PASS]' if sim_passed else '[FAIL]'}")
-    if real_passed is not None:
-        print(f"  Real Environment: {'[PASS]' if real_passed else '[FAIL]'}")
-    else:
-        print(f"  Real Environment: [SKIP]")
+    print(f"  Real Environment: {'[PASS]' if real_passed else '[FAIL]'}")
     print("="*70 + "\n")
     
-    if sim_passed and (real_passed is None or real_passed):
+    if real_passed:
         print("[SUCCESS] All tests passed! You're ready to start training.")
         print("\nNext steps:")
-        print("  1. For quick experimentation: python scripts/train_sim.py")
-        print("  2. For realistic training: python scripts/train_real.py")
+        print("  1. Start training: python scripts/train.py")
+        print("  2. Evaluate model: python scripts/evaluate.py --model results/real/dqn_real_100000_steps.zip")
         print("  3. Check README.md for detailed guide")
     else:
-        print("[WARNING] Some tests failed. Please check the error messages above.")
+        print("[WARNING] Test failed. Please check the error messages above.")
 
 
 if __name__ == "__main__":
