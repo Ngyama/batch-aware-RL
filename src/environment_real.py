@@ -19,6 +19,7 @@ from torchvision.datasets import ImageFolder
 from torch.utils.data import DataLoader
 
 import src.constants as c
+from src.graph_builder import HeteroGraphBuilder
 
 
 class SchedulingEnvReal(gym.Env):
@@ -89,7 +90,23 @@ class SchedulingEnvReal(gym.Env):
         # Initialize simulation state
         self.current_time = 0.0
         self.task_queue = collections.deque()
-        self.edge_node = {'busy': False, 'free_at_time': 0.0}
+        
+        # Multi-node support: edge_nodes is a list (supports multiple nodes)
+        # Each edge node has: {'busy': bool, 'free_at_time': float, 'node_id': int, 'current_time': float}
+        num_nodes = getattr(c, 'NUM_EDGE_NODES', 1)
+        self.edge_nodes = [
+            {'busy': False, 'free_at_time': 0.0, 'node_id': i, 'current_time': 0.0}
+            for i in range(num_nodes)
+        ]
+        # Backward compatibility: keep edge_node for single-node access
+        self.edge_node = self.edge_nodes[0] if len(self.edge_nodes) > 0 else None
+        
+        # Initialize graph builder for GNN state representation
+        self.graph_builder = HeteroGraphBuilder(
+            max_tasks=getattr(c, 'MAX_TASKS_IN_GRAPH', 100),
+            num_edge_nodes=len(self.edge_nodes)
+        )
+        self.use_graph_state = getattr(c, 'USE_GRAPH_STATE', False)  # Toggle between graph and vector state
         
         # Statistics tracking
         self.stats = {
@@ -104,7 +121,24 @@ class SchedulingEnvReal(gym.Env):
         self.recent_queue_lengths = collections.deque(maxlen=c.HISTORY_WINDOW_SIZE)
         self.recent_dispatches = collections.deque(maxlen=c.HISTORY_WINDOW_SIZE)  # (num_success, num_total)
         
-        self._schedule_next_task_arrival()
+        # Node state tracking for enhanced state features (per node)
+        self.recent_node_busy_status = [collections.deque(maxlen=c.HISTORY_WINDOW_SIZE) for _ in self.edge_nodes]
+        self.recent_processing_times = [collections.deque(maxlen=c.HISTORY_WINDOW_SIZE) for _ in self.edge_nodes]
+        
+        # Independent arrival process: each task type has its own arrival schedule
+        if c.USE_SINGLE_TASK_TYPE:
+            # Single type mode: only use first task type (camera)
+            self.task_types = [c.TASK_TYPES[0]]
+        else:
+            # Multi-type mode: use all task types
+            self.task_types = c.TASK_TYPES
+        
+        # Initialize next arrival time for each task type (independent arrival processes)
+        self.next_arrival_times = {}
+        for i, task_type in enumerate(self.task_types):
+            # Schedule first arrival for each type with small random offset to avoid simultaneous arrivals
+            arrival_delay = task_type['arrival_interval'] + random.uniform(0, task_type['arrival_interval'] * 0.1)
+            self.next_arrival_times[i] = self.current_time + arrival_delay
 
     def reset(self, seed=None, options=None):
         """Reset environment to initial state for a new episode."""
@@ -112,7 +146,14 @@ class SchedulingEnvReal(gym.Env):
         
         self.current_time = 0.0
         self.task_queue.clear()
-        self.edge_node = {'busy': False, 'free_at_time': 0.0}
+        
+        # Reset edge nodes
+        for i, node in enumerate(self.edge_nodes):
+            node['busy'] = False
+            node['free_at_time'] = 0.0
+            node['current_time'] = 0.0
+        # Backward compatibility
+        self.edge_node = self.edge_nodes[0]
         
         self.stats = {
             'total_tasks_arrived': 0,
@@ -125,11 +166,27 @@ class SchedulingEnvReal(gym.Env):
         # Reset history tracking
         self.recent_queue_lengths.clear()
         self.recent_dispatches.clear()
+        for busy_status in self.recent_node_busy_status:
+            busy_status.clear()
+        for processing_times in self.recent_processing_times:
+            processing_times.clear()
+        
+        # Reset independent arrival times for each task type
+        self.next_arrival_times = {}
+        for i, task_type in enumerate(self.task_types):
+            # Schedule first arrival for each type with small random offset
+            arrival_delay = task_type['arrival_interval'] + random.uniform(0, task_type['arrival_interval'] * 0.1)
+            self.next_arrival_times[i] = self.current_time + arrival_delay
         
         self.data_iterator = iter(self.data_loader)
-        self._schedule_next_task_arrival()
         
-        return self._get_state(), {}
+        # Return state based on mode (graph or vector)
+        if self.use_graph_state:
+            state = self._get_graph_state()
+        else:
+            state = self._get_state()
+        
+        return state, {}
 
     def step(self, action):
         """
@@ -151,22 +208,37 @@ class SchedulingEnvReal(gym.Env):
             
             if len(self.task_queue) == 0:
                 reward -= c.PENALTY_EMPTY_QUEUE
-            elif self.edge_node['busy']:
-                reward -= c.PENALTY_NODE_BUSY
             else:
-                # Execute real batch processing with actual inference
-                reward += self._execute_real_batch_dispatch(desired_batch_size)
+                # Find available edge node (multi-node support)
+                available_node = None
+                for node in self.edge_nodes:
+                    if not node['busy']:
+                        available_node = node
+                        break
+                
+                if available_node is None:
+                    reward -= c.PENALTY_NODE_BUSY
+                else:
+                    # Execute real batch processing with actual inference on selected node
+                    reward += self._execute_real_batch_dispatch(desired_batch_size, available_node)
         
         # Advance simulation time
         self.current_time += c.SIM_STEP_SECONDS
         
-        # Update world state
-        if self.edge_node['busy'] and self.current_time >= self.edge_node['free_at_time']:
-            self.edge_node['busy'] = False
+        # Update world state (multi-node support)
+        for node in self.edge_nodes:
+            node['current_time'] = self.current_time
+            if node['busy'] and self.current_time >= node['free_at_time']:
+                node['busy'] = False
+        # Backward compatibility
+        self.edge_node = self.edge_nodes[0]
         
-        if self.current_time >= self.next_task_arrival_time:
-            self._add_new_task_with_image()
-            self._schedule_next_task_arrival()
+        # Check for independent task arrivals from each sensor type
+        for type_id, task_type in enumerate(self.task_types):
+            if self.current_time >= self.next_arrival_times[type_id]:
+                self._add_new_task_with_image(type_id, task_type)
+                # Schedule next arrival for this specific type
+                self._schedule_next_arrival_for_type(type_id, task_type)
         
         # Check for expired tasks
         expired_penalty = self._remove_expired_tasks()
@@ -174,9 +246,16 @@ class SchedulingEnvReal(gym.Env):
         
         # Update history tracking for enhanced state features
         self.recent_queue_lengths.append(len(self.task_queue))
+        # Track node busy status for each node (multi-node support)
+        for i, node in enumerate(self.edge_nodes):
+            if i < len(self.recent_node_busy_status):
+                self.recent_node_busy_status[i].append(1.0 if node['busy'] else 0.0)
         
-        # Prepare return values
-        next_state = self._get_state()
+        # Prepare return values (support both graph and vector state)
+        if self.use_graph_state:
+            next_state = self._get_graph_state()
+        else:
+            next_state = self._get_state()
         terminated = expired_penalty > 0
         truncated = False
         
@@ -188,9 +267,9 @@ class SchedulingEnvReal(gym.Env):
         
         return next_state, reward, terminated, truncated, info
 
-    def _execute_real_batch_dispatch(self, desired_batch_size):
+    def _execute_real_batch_dispatch(self, desired_batch_size, edge_node):
         """
-        Execute batch dispatch with REAL ResNet-18 inference.
+        Execute batch dispatch with REAL ResNet-18 inference on specified edge node.
         
         This is the key difference from simulation:
         - Actually runs neural network inference on real images
@@ -199,6 +278,7 @@ class SchedulingEnvReal(gym.Env):
         
         Args:
             desired_batch_size: Requested batch size
+            edge_node: Edge node dictionary to process the batch
         
         Returns:
             reward: Calculated reward for this dispatch
@@ -228,10 +308,15 @@ class SchedulingEnvReal(gym.Env):
         processing_time = end_time - start_time
         self.stats['total_inference_time'] += processing_time
         
+        # Track processing time for the specific node (multi-node support)
+        node_id = edge_node.get('node_id', 0)
+        if node_id < len(self.recent_processing_times):
+            self.recent_processing_times[node_id].append(processing_time)
+        
         # Update edge node state
-        self.edge_node['busy'] = True
+        edge_node['busy'] = True
         completion_time = self.current_time + processing_time
-        self.edge_node['free_at_time'] = completion_time
+        edge_node['free_at_time'] = completion_time
         
         return self._calculate_batch_reward(batch_tasks, completion_time, actual_batch_size)
 
@@ -273,22 +358,23 @@ class SchedulingEnvReal(gym.Env):
         """
         Get current state observation.
         
-        Returns enhanced 9-dimensional state vector:
-            [0] queue_length: Current number of tasks in queue
-            [1] time_to_nearest_deadline: Time until most urgent task's deadline (seconds)
-            [2] time_since_oldest_task: How long the oldest task has been waiting (seconds)
-            [3] ratio_urgent_tasks: Fraction of tasks with deadline < 10ms
-            [4] ratio_medium_tasks: Fraction of tasks with deadline 10-30ms
-            [5] ratio_relaxed_tasks: Fraction of tasks with deadline > 30ms
-            [6] time_until_node_free: How long until edge node finishes current batch (seconds)
-            [7] avg_queue_length_recent: Average queue length over last N steps
-            [8] recent_success_rate: Success rate of last N dispatches
+        Returns state vector organized by categories:
+        
+        Category 1: Queue State (Features 0-2)
+        Category 2: Task Type Distribution (Features 3-5)
+        Category 3: Node State (Features 6, 9-11)
+        Category 4: Historical Statistics (Features 7-8)
+        Category 5: Future Extensions (Reserved)
         """
         queue_length = len(self.task_queue)
         
-        # Features 0-2: Basic queue state (original features)
+        # ============================================================
+        # Category 1: Queue State (Instant queue information)
+        # ============================================================
         if queue_length == 0:
-            time_to_nearest_deadline = c.TASK_DEADLINE_SECONDS
+            # Use maximum deadline from task types as default
+            max_deadline = max(t['deadline'] for t in self.task_types) if self.task_types else 0.05
+            time_to_nearest_deadline = max_deadline
             time_since_oldest_task = 0.0
         else:
             min_deadline = min(task['deadline'] for task in self.task_queue)
@@ -297,32 +383,77 @@ class SchedulingEnvReal(gym.Env):
             oldest_task = self.task_queue[0]
             time_since_oldest_task = self.current_time - oldest_task['arrival_time']
         
-        # Features 3-5: Task urgency distribution
-        if queue_length == 0:
-            ratio_urgent = 0.0
-            ratio_medium = 0.0
-            ratio_relaxed = 0.0
+        # [0] queue_length: Current number of tasks in queue
+        # [1] time_to_nearest_deadline: Time until most urgent task's deadline (seconds)
+        # [2] time_since_oldest_task: How long the oldest task has been waiting (seconds)
+        
+        # ============================================================
+        # Category 2: Task Type Distribution (Task type counts)
+        # ============================================================
+        # Count tasks by type in the queue
+        count_by_type = [0] * c.NUM_TASK_TYPES
+        for task in self.task_queue:
+            if 'task_type_id' in task:
+                type_id = task['task_type_id']
+                if 0 <= type_id < c.NUM_TASK_TYPES:
+                    count_by_type[type_id] += 1
+        
+        # Ensure we have exactly 3 features for task types (pad with zeros if needed)
+        count_type_0 = count_by_type[0] if len(count_by_type) > 0 else 0
+        count_type_1 = count_by_type[1] if len(count_by_type) > 1 else 0
+        count_type_2 = count_by_type[2] if len(count_by_type) > 2 else 0
+        
+        # [3] count_type_0: Number of type 0 tasks in queue (e.g., camera)
+        # [4] count_type_1: Number of type 1 tasks in queue (e.g., radar)
+        # [5] count_type_2: Number of type 2 tasks in queue (e.g., lidar)
+        
+        # Future extensions for Category 2:
+        # [RESERVED] avg_wait_time_by_type: Average waiting time per task type
+        # [RESERVED] urgent_tasks_by_type: Count of urgent tasks (deadline < threshold) per type
+        # [RESERVED] deadline_variance: Variance of deadlines in queue (urgency spread)
+        
+        # ============================================================
+        # Category 3: Node State (Computing node information)
+        # Note: For multi-node, this aggregates first node's state
+        # For full multi-node support, use _get_graph_state() instead
+        # ============================================================
+        # Use first edge node for backward compatibility
+        first_node = self.edge_nodes[0]
+        time_until_node_free = max(0.0, first_node['free_at_time'] - self.current_time)
+        node_busy_status = 1.0 if first_node['busy'] else 0.0
+        
+        # Get utilization rate from first node
+        if len(self.recent_node_busy_status) > 0 and len(self.recent_node_busy_status[0]) > 0:
+            node_utilization_rate = np.mean(list(self.recent_node_busy_status[0]))
         else:
-            num_urgent = sum(1 for task in self.task_queue 
-                           if (task['deadline'] - self.current_time) < c.URGENT_THRESHOLD)
-            num_medium = sum(1 for task in self.task_queue 
-                           if c.MEDIUM_THRESHOLD_LOW <= (task['deadline'] - self.current_time) < c.MEDIUM_THRESHOLD_HIGH)
-            num_relaxed = queue_length - num_urgent - num_medium
-            
-            ratio_urgent = num_urgent / queue_length
-            ratio_medium = num_medium / queue_length
-            ratio_relaxed = num_relaxed / queue_length
+            node_utilization_rate = 0.0  # No history, assume idle
         
-        # Feature 6: Node availability
-        time_until_node_free = max(0.0, self.edge_node['free_at_time'] - self.current_time)
+        # Get average processing time from first node
+        if len(self.recent_processing_times) > 0 and len(self.recent_processing_times[0]) > 0:
+            node_avg_processing_time = np.mean(list(self.recent_processing_times[0]))
+        else:
+            # No processing history yet, use a default value based on typical batch size
+            # Estimate based on PERFORMANCE_PROFILE for batch_size=1
+            node_avg_processing_time = 0.0016  # ~1.6ms from PERFORMANCE_PROFILE
         
-        # Feature 7: Recent average queue length
+        # [6] time_until_node_free: How long until edge node finishes current batch (seconds)
+        # [9] node_busy_status: Current node busy status (1.0 if busy, 0.0 if free)
+        # [10] node_utilization_rate: Fraction of time node was busy over last N steps
+        # [11] node_avg_processing_time: Average processing time of last N batches (seconds)
+        
+        # Future extensions for Category 3:
+        # [RESERVED] node_throughput: Tasks processed per second (recent)
+        # [RESERVED] node_pending_batch_size: Size of current batch being processed
+        # [RESERVED] node_memory_usage: Memory utilization (if multiple nodes)
+        
+        # ============================================================
+        # Category 4: Historical Statistics (Trend information)
+        # ============================================================
         if len(self.recent_queue_lengths) == 0:
             avg_queue_length_recent = queue_length
         else:
             avg_queue_length_recent = np.mean(self.recent_queue_lengths)
         
-        # Feature 8: Recent success rate
         if len(self.recent_dispatches) == 0:
             recent_success_rate = 1.0  # Assume 100% at start
         else:
@@ -330,32 +461,116 @@ class SchedulingEnvReal(gym.Env):
             total_tasks = sum(total for _, total in self.recent_dispatches)
             recent_success_rate = total_success / total_tasks if total_tasks > 0 else 1.0
         
-        return np.array([
-            queue_length,
-            time_to_nearest_deadline,
-            time_since_oldest_task,
-            ratio_urgent,
-            ratio_medium,
-            ratio_relaxed,
-            time_until_node_free,
-            avg_queue_length_recent,
-            recent_success_rate
-        ], dtype=np.float32)
-
-    def _schedule_next_task_arrival(self):
-        """Schedule next task arrival time (Poisson process or fixed rate)."""
-        if c.TASK_ARRIVAL_MODE == "fixed_rate":
-            arrival_delay = 1.0 / c.FIXED_FRAME_RATE
-        else:
-            arrival_delay = random.expovariate(1.0 / c.TASK_ARRIVAL_INTERVAL_SECONDS)
+        # [7] avg_queue_length_recent: Average queue length over last N steps
+        # [8] recent_success_rate: Success rate of last N dispatches
         
-        self.next_task_arrival_time = self.current_time + arrival_delay
+        # Future extensions for Category 4:
+        # [RESERVED] queue_length_trend: Trend of queue length (increasing/decreasing rate)
+        # [RESERVED] avg_latency_recent: Average task latency in recent dispatches
+        # [RESERVED] deadline_miss_rate: Rate of deadline misses in recent history
+        
+        # ============================================================
+        # Category 5: Future Extensions (Reserved for dependencies, etc.)
+        # ============================================================
+        # [RESERVED] task_dependency_count: Number of tasks waiting for dependencies
+        # [RESERVED] dependent_task_ratio: Ratio of tasks with dependencies
+        # [RESERVED] system_load_prediction: Predicted load in next time window
+        # [RESERVED] multi_node_state: State information if multiple nodes (future)
+        
+        # ============================================================
+        # Assemble state vector (currently 12 dimensions)
+        # ============================================================
+        # Note: For multi-node, this aggregates first node's state
+        # For full multi-node support, use _get_graph_state() instead
+        return np.array([
+            # Category 1: Queue State (Features 0-2)
+            queue_length,                    # [0]
+            time_to_nearest_deadline,        # [1]
+            time_since_oldest_task,          # [2]
+            
+            # Category 2: Task Type Distribution (Features 3-5)
+            count_type_0,                    # [3]
+            count_type_1,                    # [4]
+            count_type_2,                    # [5]
+            
+            # Category 3: Node State (Features 6, 9-11)
+            time_until_node_free,            # [6]
+            # Note: Features 7-8 are in Category 4
+            node_busy_status,                # [9]
+            node_utilization_rate,           # [10]
+            node_avg_processing_time,        # [11]
+            
+            # Category 4: Historical Statistics (Features 7-8)
+            avg_queue_length_recent,         # [7]
+            recent_success_rate,             # [8]
+            
+            # Category 5: Future Extensions
+            # Reserved for: task dependencies, multi-node, load prediction, etc.
+            # Will extend state vector when needed
+        ], dtype=np.float32)
+    
+    def _get_graph_state(self):
+        """
+        Get current state as heterogeneous graph for GNN processing.
+        
+        Returns:
+            Dictionary with graph data structure (compatible with PyTorch Geometric or DGL)
+        """
+        # Prepare recent statistics for graph builder
+        recent_stats = {
+            'node_utilization': [],
+            'node_avg_processing_time': []
+        }
+        
+        for i in range(len(self.edge_nodes)):
+            # Get utilization rate for this node
+            if i < len(self.recent_node_busy_status) and len(self.recent_node_busy_status[i]) > 0:
+                utilization = np.mean(list(self.recent_node_busy_status[i]))
+            else:
+                utilization = 1.0 if self.edge_nodes[i]['busy'] else 0.0
+            
+            # Get average processing time for this node
+            if i < len(self.recent_processing_times) and len(self.recent_processing_times[i]) > 0:
+                avg_processing_time = np.mean(list(self.recent_processing_times[i]))
+            else:
+                avg_processing_time = 0.0016  # Default
+            
+            recent_stats['node_utilization'].append(utilization)
+            recent_stats['node_avg_processing_time'].append(avg_processing_time)
+        
+        # Build graph
+        graph_data = self.graph_builder.build_graph(
+            task_queue=self.task_queue,
+            edge_nodes=self.edge_nodes,
+            current_time=self.current_time,
+            task_types=self.task_types,
+            recent_stats=recent_stats
+        )
+        
+        return graph_data
 
-    def _add_new_task_with_image(self):
+    def _schedule_next_arrival_for_type(self, type_id, task_type):
+        """
+        Schedule next arrival time for a specific task type (independent arrival process).
+        
+        Args:
+            type_id: Task type ID
+            task_type: Task type dictionary with arrival_interval
+        """
+        # Use fixed interval for each sensor type (can be extended to Poisson if needed)
+        arrival_delay = task_type['arrival_interval']
+        self.next_arrival_times[type_id] = self.current_time + arrival_delay
+
+    def _add_new_task_with_image(self, type_id, task_type):
         """
         Add a new task to the queue WITH A REAL IMAGE.
         
-        Loads an actual image from Imagenette dataset.
+        Loads an actual image from Imagenette dataset and assigns the specified task type.
+        This method is called for each independent sensor arrival.
+        
+        Args:
+            type_id: Task type ID (determined by which sensor is arriving)
+            task_type: Task type dictionary with deadline and name
         """
         try:
             image, label = next(self.data_iterator)
@@ -364,18 +579,12 @@ class SchedulingEnvReal(gym.Env):
             self.data_iterator = iter(self.data_loader)
             image, label = next(self.data_iterator)
         
-        # Calculate deadline based on mode
-        if hasattr(c, 'TASK_DEADLINE_MODE') and c.TASK_DEADLINE_MODE == "random":
-            # Random deadline: simulates heterogeneous task urgency
-            deadline_duration = random.uniform(c.TASK_DEADLINE_MIN, c.TASK_DEADLINE_MAX)
-        else:
-            # Fixed deadline
-            deadline_duration = c.TASK_DEADLINE_SECONDS
-        
-        # Create task with real image data
+        # Create task with real image data and assigned task type
         new_task = {
             'arrival_time': self.current_time,
-            'deadline': self.current_time + deadline_duration,
+            'deadline': self.current_time + task_type['deadline'],
+            'task_type': task_type['name'],      # Task type name (e.g., 'camera', 'radar')
+            'task_type_id': type_id,              # Task type ID (0, 1, 2, ...)
             'task_id': self.stats['total_tasks_arrived'],
             'image': image,  # Actual image tensor
             'label': label   # Ground truth label

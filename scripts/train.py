@@ -20,6 +20,7 @@ from stable_baselines3.common.callbacks import BaseCallback
 import numpy as np
 
 from src.environment_real import SchedulingEnvReal
+from src.gnn_encoder import GraphStateWrapper
 import src.constants as c
 
 
@@ -79,6 +80,17 @@ def main():
     print("="*70)
     print(f"\nTotal Timesteps: {c.TOTAL_TIMESTEPS:,}")
     print(f"Inference Device: {c.INFERENCE_DEVICE}")
+    
+    # Check if using graph state
+    use_graph_state = getattr(c, 'USE_GRAPH_STATE', False)
+    num_edge_nodes = getattr(c, 'NUM_EDGE_NODES', 1)
+    
+    if use_graph_state:
+        print(f"State Mode: Graph (GNN-based)")
+        print(f"Number of Edge Nodes: {num_edge_nodes}")
+    else:
+        print(f"State Mode: Vector (traditional)")
+    
     print("="*70 + "\n")
     
     # Check CUDA availability
@@ -90,7 +102,8 @@ def main():
             return
     
     # Create results directory
-    results_path = "results/real"
+    state_mode = "graph" if use_graph_state else "vector"
+    results_path = f"results/real_{state_mode}"
     os.makedirs(results_path, exist_ok=True)
     
     # Create environment
@@ -104,7 +117,22 @@ def main():
         print("  - CUDA/PyTorch installation issues")
         return
     
-    print("\n[√] Environment created\n")
+    print("\n[√] Environment created")
+    
+    # Wrap environment with GNN encoder if using graph state
+    if use_graph_state:
+        print("[INIT] Wrapping environment with GNN encoder...")
+        training_device = 'cuda' if c.INFERENCE_DEVICE == 'cuda' and torch.cuda.is_available() else 'cpu'
+        gnn_output_dim = getattr(c, 'GNN_OUTPUT_DIM', 64)
+        env = GraphStateWrapper(
+            env,
+            encoder=None,  # Will create default encoder
+            output_dim=gnn_output_dim,  # Output state dimension
+            device=training_device
+        )
+        print(f"[√] GNN encoder created (output_dim={gnn_output_dim}, device={training_device})\n")
+    else:
+        print("[√] Using vector state (no wrapper needed)\n")
     
     # Create DQN agent
     # Use the same device as the environment to avoid CUDA compatibility issues
@@ -144,9 +172,16 @@ def main():
         print(f"\n[ERROR] Error during training: {e}")
     
     # Save model
-    model_save_path = os.path.join(results_path, f"dqn_real_{c.TOTAL_TIMESTEPS}_steps.zip")
+    model_name = f"dqn_real_{state_mode}_{c.TOTAL_TIMESTEPS}_steps.zip"
+    model_save_path = os.path.join(results_path, model_name)
     model.save(model_save_path)
     print(f"[SAVED] Model saved to: {model_save_path}")
+    
+    # Save GNN encoder if using graph state
+    if use_graph_state and hasattr(env, 'encoder'):
+        encoder_path = os.path.join(results_path, "gnn_encoder.pt")
+        torch.save(env.encoder.state_dict(), encoder_path)
+        print(f"[SAVED] GNN encoder saved to: {encoder_path}")
     
     # Save statistics
     stats_path = os.path.join(results_path, "training_stats.npz")

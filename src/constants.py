@@ -41,16 +41,19 @@ PERFORMANCE_PROFILE = {
 # Simulates multiple sensors (cameras, radar, lidar) triggering simultaneously
 TASK_ARRIVAL_INTERVAL_SECONDS = 0.005  # 5ms average interval (10x higher load)
 
-# Deadline options:
-# Option 1: Fixed deadline (simpler, good for initial testing)
-TASK_DEADLINE_SECONDS = 0.03           # 30ms deadline (6x task interval, moderate pressure)
+# Task type definitions (discrete deadline types with independent arrival processes)
+# Each task type represents a different sensor with its own arrival rate and deadline
+# This design reflects real ADAS systems where sensors have independent sampling frequencies
+TASK_TYPES = [
+    {'name': 'camera', 'deadline': 0.03, 'arrival_interval': 0.033},  # Camera: 30fps (33ms), 30ms deadline
+    {'name': 'radar', 'deadline': 0.02, 'arrival_interval': 0.020},  # Radar: 50Hz (20ms), 20ms deadline
+    {'name': 'lidar', 'deadline': 0.05, 'arrival_interval': 0.100}    # LiDAR: 10Hz (100ms), 50ms deadline
+]
+NUM_TASK_TYPES = len(TASK_TYPES)
 
-# Option 2: Random deadline (more realistic, uncomment to use)
-# Will be implemented in environment as: random.uniform(0.02, 0.05)
-# This creates task heterogeneity: urgent tasks (20ms) vs relaxed tasks (50ms)
-TASK_DEADLINE_MODE = "fixed"           # "fixed" or "random"
-TASK_DEADLINE_MIN = 0.02               # Min deadline for random mode (20ms)
-TASK_DEADLINE_MAX = 0.05               # Max deadline for random mode (50ms)
+# Legacy support: For backward compatibility, you can use a single type
+# Set USE_SINGLE_TASK_TYPE = True to simulate single sensor scenario
+USE_SINGLE_TASK_TYPE = False  # Set to True to use only camera type (all tasks same deadline)
 
 # How much simulation time (in seconds) passes in a single step of the environment.
 # This defines the time resolution of our simulation.
@@ -81,11 +84,32 @@ LEARNING_STARTS = 1000
 # SECTION 4: ENVIRONMENT DEFINITION (The "Game" Rules)
 # ================================================================
 # The number of features in our state vector.
-# Enhanced 9-dimensional state space:
-# [queue_length, time_to_nearest_deadline, time_since_oldest_task,
-#  ratio_urgent_tasks, ratio_medium_tasks, ratio_relaxed_tasks,
-#  time_until_node_free, avg_queue_length_recent, recent_success_rate]
-NUM_STATE_FEATURES = 9
+# Enhanced 12-dimensional state space organized by categories:
+#
+# Category 1: Queue State (Features 0-2)
+#   [0] queue_length: Current number of tasks in queue
+#   [1] time_to_nearest_deadline: Time until most urgent task's deadline (seconds)
+#   [2] time_since_oldest_task: How long the oldest task has been waiting (seconds)
+#
+# Category 2: Task Type Distribution (Features 3-5)
+#   [3] count_type_0: Number of type 0 tasks in queue (e.g., camera)
+#   [4] count_type_1: Number of type 1 tasks in queue (e.g., radar)
+#   [5] count_type_2: Number of type 2 tasks in queue (e.g., lidar)
+#
+# Category 3: Node State (Features 6, 9-11)
+#   [6] time_until_node_free: How long until edge node finishes current batch (seconds)
+#   [9] node_busy_status: Current node busy status (1.0 if busy, 0.0 if free)
+#   [10] node_utilization_rate: Fraction of time node was busy over last N steps
+#   [11] node_avg_processing_time: Average processing time of last N batches (seconds)
+#
+# Category 4: Historical Statistics (Features 7-8)
+#   [7] avg_queue_length_recent: Average queue length over last N steps
+#   [8] recent_success_rate: Success rate of last N dispatches
+#
+# Category 5: Future Extensions (Reserved)
+#   Reserved for: task dependencies, multi-node state, load prediction, etc.
+#
+NUM_STATE_FEATURES = 12
 
 # --- Action Space Definitions ---
 # Batch-aware action space:
@@ -145,8 +169,21 @@ PENALTY_WAIT = 0.01  # Small penalty for waiting
 # Window size for calculating recent statistics (in number of steps)
 HISTORY_WINDOW_SIZE = 10
 
-# Thresholds for task urgency classification (in seconds)
-URGENT_THRESHOLD = 0.01      # Tasks with deadline < 10ms are "urgent"
-MEDIUM_THRESHOLD_LOW = 0.01  # Lower bound for medium urgency
-MEDIUM_THRESHOLD_HIGH = 0.03 # Upper bound for medium urgency (30ms)
-# Tasks with deadline > 30ms are considered "relaxed"
+# Note: Task urgency classification is now based on discrete task types
+# instead of threshold-based ratios. This is more realistic and interpretable.
+
+
+# ================================================================
+# SECTION 8: MULTI-NODE CONFIGURATION
+# ================================================================
+# Number of edge computing nodes in the system
+NUM_EDGE_NODES = 1  # Currently 1 node, can be extended to multiple nodes
+
+# Graph state configuration
+USE_GRAPH_STATE = False  # Set to True to use GNN-based graph state representation
+MAX_TASKS_IN_GRAPH = 100  # Maximum number of tasks to include in graph (for fixed-size graph)
+
+# GNN encoder configuration (only used when USE_GRAPH_STATE = True)
+GNN_OUTPUT_DIM = 64  # Output dimension of GNN encoder (state vector size)
+GNN_HIDDEN_DIM = 64  # Hidden dimension for GNN layers
+GNN_NUM_LAYERS = 2   # Number of GNN convolution layers
