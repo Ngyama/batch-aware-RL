@@ -18,16 +18,19 @@ This research explores how reinforcement learning can learn optimal batch schedu
 ```
 batch-aware/
 ├── src/
-│   ├── environment_real.py     # Real data environment  
-│   ├── constants.py            # Configuration parameters
-│   └── __init__.py
+│   ├── environment_real.py     # Real-data Gymnasium env
+│   ├── graph_builder.py        # Heterogeneous graph construction
+│   ├── gnn_encoder.py          # GNN encoder + wrapper
+│   ├── node_selector.py        # State-aware node scoring
+│   └── constants.py            # Centralized configuration
 ├── scripts/
-│   ├── train.py                # Training script
-│   ├── evaluate.py             # Model evaluation
-│   └── utils/                   # Utility scripts
-├── data/
-│   └── imagenette2/            # Dataset directory
-└── results/                    # Training results
+│   ├── train.py                # Training pipeline (vector or graph state)
+│   ├── evaluate.py             # Evaluation + metrics export
+│   └── utils/                  # Dataset download & profiling tools
+├── docs/                       # Design notes (GNN usage, graph spec, flow)
+├── tests/                      # Smoke tests (`test_environments.py`)
+├── data/imagenette2/           # Imagenette dataset (downloaded locally)
+└── results/                    # Checkpoints, metrics, TensorBoard logs
 ```
 
 ## Quick Start
@@ -68,15 +71,15 @@ python scripts/evaluate.py --model results/real/dqn_real_100000_steps.zip --epis
 
 ## Configuration
 
-Key parameters can be modified in `src/constants.py`:
+Key parameters live in `src/constants.py`:
 
-- `BATCH_SIZE_OPTIONS`: Available batch sizes for scheduling
-- `TASK_ARRIVAL_INTERVAL_SECONDS`: Task arrival rate
-- `TASK_DEADLINE_SECONDS`: Task deadline constraints
-- `TOTAL_TIMESTEPS`: Training duration
-- `LEARNING_RATE`: RL agent learning rate
-- `REWARD_TASK_SUCCESS`: Reward for successful task completion
-- `PENALTY_TASK_MISS`: Penalty for missing deadlines
+- `TASK_TYPES`: Sensor-specific deadline + arrival interval definitions
+- `USE_SINGLE_TASK_TYPE`: Force single-modality workloads for ablation
+- `BATCH_SIZE_OPTIONS`: Discrete batch sizes the agent can dispatch
+- `NUM_EDGE_NODES`: Number of edge devices simulated
+- `USE_GRAPH_STATE` / `GNN_OUTPUT_DIM`: Enable GNN encoder and pick output size
+- `TOTAL_TIMESTEPS`, `LEARNING_RATE`, `BUFFER_SIZE`, `GAMMA`: RL hyperparameters
+- `REWARD_TASK_SUCCESS`, `PENALTY_TASK_MISS`, `LATENCY_PENALTY_COEFF`: reward shaping
 
 ## Research Directions
 
@@ -106,6 +109,14 @@ View training progress:
 ```bash
 tensorboard --logdir results/real/tensorboard
 ```
+
+## Documentation
+
+The most up-to-date design notes live under `docs/`:
+
+- `GNN_USAGE.md`: how to enable graph state + training tips
+- `GRAPH_STATE_DESIGN.md`: node/edge schemas and feature scaling
+- `SYSTEM_FLOW_CN.md`: 中文版数据流向说明（含节点打分链路）
 
 ## Research Context
 

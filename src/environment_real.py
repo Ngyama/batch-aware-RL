@@ -1,8 +1,5 @@
 """
 Real Data Environment for Batch-Aware RL Scheduler
-
-Processes actual images from Imagenette dataset using real ResNet-18 inference,
-providing realistic timing measurements at the cost of slower training.
 """
 
 import gymnasium as gym
@@ -20,15 +17,10 @@ from torch.utils.data import DataLoader
 
 import src.constants as c
 from src.graph_builder import HeteroGraphBuilder
+from src.node_selector import StateAwareNodeSelector
 
 
 class SchedulingEnvReal(gym.Env):
-    """
-    Real-data environment for batch-aware scheduling.
-    
-    Loads actual images and runs real ResNet-18 inference to measure
-    processing times, providing realistic environment behavior.
-    """
 
     def __init__(self):
         super(SchedulingEnvReal, self).__init__()
@@ -107,6 +99,13 @@ class SchedulingEnvReal(gym.Env):
             num_edge_nodes=len(self.edge_nodes)
         )
         self.use_graph_state = getattr(c, 'USE_GRAPH_STATE', False)  # Toggle between graph and vector state
+        self.node_descriptor_dim = getattr(c, 'GNN_OUTPUT_DIM', c.NUM_STATE_FEATURES)
+        self.last_state_vector = None  # Injected by GraphStateWrapper when using graph state
+        self.last_node_embeddings = None
+        self.node_selector = StateAwareNodeSelector(
+            descriptor_dim=self.node_descriptor_dim,
+            history_window=c.HISTORY_WINDOW_SIZE
+        )
         
         # Statistics tracking
         self.stats = {
@@ -178,6 +177,9 @@ class SchedulingEnvReal(gym.Env):
             arrival_delay = task_type['arrival_interval'] + random.uniform(0, task_type['arrival_interval'] * 0.1)
             self.next_arrival_times[i] = self.current_time + arrival_delay
         
+        self.last_state_vector = None
+        self.last_node_embeddings = None
+        
         self.data_iterator = iter(self.data_loader)
         
         # Return state based on mode (graph or vector)
@@ -210,11 +212,16 @@ class SchedulingEnvReal(gym.Env):
                 reward -= c.PENALTY_EMPTY_QUEUE
             else:
                 # Find available edge node (multi-node support)
-                available_node = None
-                for node in self.edge_nodes:
-                    if not node['busy']:
-                        available_node = node
-                        break
+                state_vector = self.last_state_vector if self.use_graph_state else None
+                node_embeddings = self.last_node_embeddings if self.use_graph_state else None
+                available_node = self.node_selector.select_node(
+                    edge_nodes=self.edge_nodes,
+                    current_time=self.current_time,
+                    recent_busy_history=self.recent_node_busy_status,
+                    recent_processing_times=self.recent_processing_times,
+                    state_vector=state_vector,
+                    node_embeddings=node_embeddings
+                )
                 
                 if available_node is None:
                     reward -= c.PENALTY_NODE_BUSY
@@ -319,6 +326,7 @@ class SchedulingEnvReal(gym.Env):
         edge_node['free_at_time'] = completion_time
         
         return self._calculate_batch_reward(batch_tasks, completion_time, actual_batch_size)
+
 
     def _calculate_batch_reward(self, batch_tasks, completion_time, batch_size):
         """

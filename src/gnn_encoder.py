@@ -47,6 +47,7 @@ class HeteroGraphEncoder(nn.Module):
         self.hidden_dim = hidden_dim
         self.output_dim = output_dim
         self.num_layers = num_layers
+        self.last_edge_embeddings: Optional[torch.Tensor] = None
         
         # Task node encoder
         self.task_encoder = nn.Sequential(
@@ -157,6 +158,9 @@ class HeteroGraphEncoder(nn.Module):
             edge_aggregated = self.edge_aggregator(edge_aggregated)  # [hidden_dim]
         else:
             edge_aggregated = torch.zeros(self.hidden_dim, device=edge_embeddings.device if edge_embeddings.numel() > 0 else torch.device('cpu'))
+        
+        # Cache edge embeddings for downstream consumers (e.g., node selector)
+        self.last_edge_embeddings = edge_embeddings.detach().clone() if edge_embeddings.shape[0] > 0 else None
         
         # Concatenate and output
         combined = torch.cat([task_aggregated, edge_aggregated], dim=0)  # [hidden_dim * 2]
@@ -354,9 +358,11 @@ class GraphStateWrapper:
         
         # Convert graph to vector if needed
         if isinstance(state, dict):
-            state_vector = self._encode_graph(state)
+            state_vector, edge_embeddings = self._encode_graph(state)
+            self._update_last_graph_artifacts(state_vector, edge_embeddings)
         else:
             state_vector = state
+            self._update_last_graph_artifacts(state_vector, None)
         
         return state_vector, info
     
@@ -366,13 +372,15 @@ class GraphStateWrapper:
         
         # Convert graph to vector if needed
         if isinstance(state, dict):
-            state_vector = self._encode_graph(state)
+            state_vector, edge_embeddings = self._encode_graph(state)
+            self._update_last_graph_artifacts(state_vector, edge_embeddings)
         else:
             state_vector = state
+            self._update_last_graph_artifacts(state_vector, None)
         
         return state_vector, reward, terminated, truncated, info
     
-    def _encode_graph(self, graph_data: Dict) -> np.ndarray:
+    def _encode_graph(self, graph_data: Dict) -> tuple[np.ndarray, Optional[np.ndarray]]:
         """
         Encode graph data to vector using GNN encoder.
         
@@ -388,9 +396,22 @@ class GraphStateWrapper:
         # Encode graph
         with torch.no_grad():
             state_vector = self.encoder(graph_data_device)
+            edge_embeddings = self.encoder.last_edge_embeddings
         
-        # Convert to numpy and return
-        return state_vector.cpu().numpy().flatten()
+        state_np = state_vector.cpu().numpy().flatten()
+        edge_np = edge_embeddings.detach().cpu().numpy() if edge_embeddings is not None else None
+        return state_np, edge_np
+
+    def _update_last_graph_artifacts(
+        self,
+        state_vector: Optional[np.ndarray],
+        edge_embeddings: Optional[np.ndarray]
+    ):
+        """Share latest GNN outputs with the environment for downstream logic."""
+        if hasattr(self.env, 'last_state_vector'):
+            self.env.last_state_vector = None if state_vector is None else np.array(state_vector, copy=True)
+        if hasattr(self.env, 'last_node_embeddings'):
+            self.env.last_node_embeddings = None if edge_embeddings is None else np.array(edge_embeddings, copy=True)
     
     def _move_graph_to_device(self, graph_data: Dict, device: torch.device) -> Dict:
         """Move graph tensors to specified device."""
