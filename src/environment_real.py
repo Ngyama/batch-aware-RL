@@ -23,18 +23,19 @@ from src.node_selector import StateAwareNodeSelector
 class SchedulingEnvReal(gym.Env):
 
     def __init__(self):
-        super(SchedulingEnvReal, self).__init__()
+        # Initialize the parent class
+        super().__init__()
 
         # Define action and observation spaces
         self.action_space = spaces.Discrete(c.NUM_ACTIONS)
         
-        # Enhanced 9-dimensional state space
+        # Enhanced 12-dimensional state space (between 0 and infinity)
         low = np.array([0] * c.NUM_STATE_FEATURES, dtype=np.float32)
         high = np.array([np.inf] * c.NUM_STATE_FEATURES, dtype=np.float32)
         self.observation_space = spaces.Box(low, high, dtype=np.float32)
         
         # Setup neural network model and dataset
-        print("[INIT] Initializing Real Environment...")
+        print("[INIT] Initializing Environment...")
         
         self.device = torch.device(c.INFERENCE_DEVICE if torch.cuda.is_available() else "cpu")
         print(f"  - Using device: {self.device}")
@@ -55,11 +56,6 @@ class SchedulingEnvReal(gym.Env):
         
         # Load Imagenette dataset
         train_path = os.path.join(c.IMAGENETTE_PATH, 'train')
-        if not os.path.exists(train_path):
-            raise FileNotFoundError(
-                f"Imagenette dataset not found at {train_path}. "
-                f"Please ensure the dataset is downloaded."
-            )
         
         print(f"  - Loading Imagenette dataset from {train_path}...")
         self.dataset = ImageFolder(root=train_path, transform=self.preprocess)
@@ -77,20 +73,19 @@ class SchedulingEnvReal(gym.Env):
                     _ = self.model(dummy_input)
             torch.cuda.synchronize()
         
-        print("[√] Real Environment initialized successfully!")
+        print("[Done] Environment initialized successfully!")
         
         # Initialize simulation state
         self.current_time = 0.0
         self.task_queue = collections.deque()
         
-        # Multi-node support: edge_nodes is a list (supports multiple nodes)
-        # Each edge node has: {'busy': bool, 'free_at_time': float, 'node_id': int, 'current_time': float}
+        # List of edge nodes with their states(Only one node for now)
         num_nodes = getattr(c, 'NUM_EDGE_NODES', 1)
         self.edge_nodes = [
             {'busy': False, 'free_at_time': 0.0, 'node_id': i, 'current_time': 0.0}
             for i in range(num_nodes)
         ]
-        # Backward compatibility: keep edge_node for single-node access
+
         self.edge_node = self.edge_nodes[0] if len(self.edge_nodes) > 0 else None
         
         # Initialize graph builder for GNN state representation
@@ -98,9 +93,9 @@ class SchedulingEnvReal(gym.Env):
             max_tasks=getattr(c, 'MAX_TASKS_IN_GRAPH', 100),
             num_edge_nodes=len(self.edge_nodes)
         )
-        self.use_graph_state = getattr(c, 'USE_GRAPH_STATE', False)  # Toggle between graph and vector state
+        self.use_graph_state = getattr(c, 'USE_GRAPH_STATE', True)
         self.node_descriptor_dim = getattr(c, 'GNN_OUTPUT_DIM', c.NUM_STATE_FEATURES)
-        self.last_state_vector = None  # Injected by GraphStateWrapper when using graph state
+        self.last_state_vector = None
         self.last_node_embeddings = None
         self.node_selector = StateAwareNodeSelector(
             descriptor_dim=self.node_descriptor_dim,
@@ -326,7 +321,6 @@ class SchedulingEnvReal(gym.Env):
         edge_node['free_at_time'] = completion_time
         
         return self._calculate_batch_reward(batch_tasks, completion_time, actual_batch_size)
-
 
     def _calculate_batch_reward(self, batch_tasks, completion_time, batch_size):
         """

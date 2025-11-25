@@ -1,18 +1,5 @@
 """
 Graph Builder for Multi-Node Batch Scheduling
-
-Builds heterogeneous graphs for GNN-based state representation.
-Supports multiple edge nodes and task queues with various relationship types.
-
-Node Types:
-- Task: Tasks in the queue
-- Edge: Computing nodes
-
-Edge Types:
-- queue: Task sequential order
-- type: Same type tasks
-- affinity: Task-Edge matching
-- topology: Edge-Edge connections
 """
 
 import torch
@@ -25,17 +12,11 @@ import src.constants as c
 class HeteroGraphBuilder:
     """
     Builds heterogeneous graphs from environment state for GNN processing.
-    
-    Supports multi-node scenarios with task-queue and edge-node relationships.
     """
     
     def __init__(self, max_tasks: int = 100, num_edge_nodes: int = 1):
         """
         Initialize graph builder.
-        
-        Args:
-            max_tasks: Maximum number of tasks to include in graph (for fixed-size graph)
-            num_edge_nodes: Number of edge computing nodes
         """
         self.max_tasks = max_tasks
         self.num_edge_nodes = num_edge_nodes
@@ -74,19 +55,13 @@ class HeteroGraphBuilder:
         num_tasks = len(tasks)
         num_edges = len(edge_nodes)
         
-        # ============================================================
         # Build Task Nodes
-        # ============================================================
         task_features = self._build_task_nodes(tasks, current_time, task_types)
         
-        # ============================================================
         # Build Edge Nodes
-        # ============================================================
         edge_features = self._build_edge_nodes(edge_nodes, recent_stats)
         
-        # ============================================================
         # Build Edges
-        # ============================================================
         edge_data = self._build_edges(tasks, edge_nodes, num_tasks, num_edges)
         
         return {

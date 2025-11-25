@@ -106,6 +106,6 @@ USE_GRAPH_STATE = False  # Set to True to use GNN-based graph state representati
 MAX_TASKS_IN_GRAPH = 100  # Maximum number of tasks to include in graph
 
 # GNN encoder configuration (only used when USE_GRAPH_STATE = True)
-GNN_OUTPUT_DIM = 64  # Output dimension of GNN encoder (state vector size)
+GNN_OUTPUT_DIM = 64  # Output dimension of GNN encoder
 GNN_HIDDEN_DIM = 64  # Hidden dimension for GNN layers
 GNN_NUM_LAYERS = 2   # Number of GNN convolution layers

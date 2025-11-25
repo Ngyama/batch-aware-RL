@@ -1,11 +1,5 @@
 """
 Training Script for Batch-Aware RL Scheduler
-
-Trains RL agent using real environment with actual ResNet-18 image processing.
-Training uses GPU inference for realistic performance evaluation.
-
-Usage:
-    python scripts/train.py
 """
 
 import sys
@@ -65,6 +59,7 @@ class TrainingMonitorCallback(BaseCallback):
                 total_inference = sum(s.get('total_inference_time', 0) for s in recent_stats)
                 avg_inference_time = total_inference / max(1, total_completed + total_failed)
                 
+                # Calculate average latency
                 print(f"\n--- Episode {len(self.episode_rewards)} ---")
                 print(f"  Mean Reward: {np.mean(recent_rewards):.2f} ± {np.std(recent_rewards):.2f}")
                 print(f"  Mean Length: {np.mean(recent_lengths):.2f}")
@@ -75,22 +70,15 @@ class TrainingMonitorCallback(BaseCallback):
 
 
 def main():
+    # Print training configuration
     print("="*70)
-    print("BATCH-AWARE RL SCHEDULER - REAL DATA TRAINING")
+    print("BATCH-AWARE RL SCHEDULER")
     print("="*70)
     print(f"\nTotal Timesteps: {c.TOTAL_TIMESTEPS:,}")
     print(f"Inference Device: {c.INFERENCE_DEVICE}")
-    
-    # Check if using graph state
-    use_graph_state = getattr(c, 'USE_GRAPH_STATE', False)
+    print(f"State Mode: Graph")
     num_edge_nodes = getattr(c, 'NUM_EDGE_NODES', 1)
-    
-    if use_graph_state:
-        print(f"State Mode: Graph (GNN-based)")
-        print(f"Number of Edge Nodes: {num_edge_nodes}")
-    else:
-        print(f"State Mode: Vector (traditional)")
-    
+    print(f"Number of Edge Nodes: {num_edge_nodes}")
     print("="*70 + "\n")
     
     # Check CUDA availability
@@ -102,8 +90,7 @@ def main():
             return
     
     # Create results directory
-    state_mode = "graph" if use_graph_state else "vector"
-    results_path = f"results/real_{state_mode}"
+    results_path = "results/real_gnn"
     os.makedirs(results_path, exist_ok=True)
     
     # Create environment
@@ -119,20 +106,17 @@ def main():
     
     print("\n[√] Environment created")
     
-    # Wrap environment with GNN encoder if using graph state
-    if use_graph_state:
-        print("[INIT] Wrapping environment with GNN encoder...")
-        training_device = 'cuda' if c.INFERENCE_DEVICE == 'cuda' and torch.cuda.is_available() else 'cpu'
-        gnn_output_dim = getattr(c, 'GNN_OUTPUT_DIM', 64)
-        env = GraphStateWrapper(
-            env,
-            encoder=None,  # Will create default encoder
-            output_dim=gnn_output_dim,  # Output state dimension
-            device=training_device
-        )
-        print(f"[√] GNN encoder created (output_dim={gnn_output_dim}, device={training_device})\n")
-    else:
-        print("[√] Using vector state (no wrapper needed)\n")
+    # Wrap environment with GNN encoder
+    print("[INIT] Wrapping environment with GNN encoder")
+    training_device = 'cuda' if c.INFERENCE_DEVICE == 'cuda' and torch.cuda.is_available() else 'cpu'
+    gnn_output_dim = getattr(c, 'GNN_OUTPUT_DIM', 64)
+    env = GraphStateWrapper(
+        env,
+        encoder=None,  # Will create default encoder
+        output_dim=gnn_output_dim,  # Output state dimension
+        device=training_device
+    )
+    print(f"[√] GNN encoder created (output_dim={gnn_output_dim}, device={training_device})\n")
     
     # Create DQN agent
     # Use the same device as the environment to avoid CUDA compatibility issues
@@ -172,13 +156,13 @@ def main():
         print(f"\n[ERROR] Error during training: {e}")
     
     # Save model
-    model_name = f"dqn_real_{state_mode}_{c.TOTAL_TIMESTEPS}_steps.zip"
+    model_name = f"dqn_real_gnn_{c.TOTAL_TIMESTEPS}_steps.zip"
     model_save_path = os.path.join(results_path, model_name)
     model.save(model_save_path)
     print(f"[SAVED] Model saved to: {model_save_path}")
     
-    # Save GNN encoder if using graph state
-    if use_graph_state and hasattr(env, 'encoder'):
+    # Save GNN encoder
+    if hasattr(env, 'encoder'):
         encoder_path = os.path.join(results_path, "gnn_encoder.pt")
         torch.save(env.encoder.state_dict(), encoder_path)
         print(f"[SAVED] GNN encoder saved to: {encoder_path}")
