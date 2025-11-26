@@ -106,6 +106,11 @@ def main():
     
     print("\n[√] Environment created")
     
+    # Force graph state mode so wrapper receives heterogeneous graphs
+    if hasattr(env, 'use_graph_state') and not getattr(env, 'use_graph_state'):
+        print("[INFO] Enabling graph state mode on environment for GNN training.")
+        env.use_graph_state = True
+    
     # Wrap environment with GNN encoder
     print("[INIT] Wrapping environment with GNN encoder")
     training_device = 'cuda' if c.INFERENCE_DEVICE == 'cuda' and torch.cuda.is_available() else 'cpu'

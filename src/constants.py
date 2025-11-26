@@ -99,10 +99,10 @@ HISTORY_WINDOW_SIZE = 10
 # ================================================================
 # SECTION 8: MULTI-NODE CONFIGURATION
 # ================================================================
-NUM_EDGE_NODES = 1  # Currently 1 node, can be extended to multiple nodes
+NUM_EDGE_NODES = 3  # Number of simulated edge nodes
 
 # Graph state configuration
-USE_GRAPH_STATE = False  # Set to True to use GNN-based graph state representation
+USE_GRAPH_STATE = True  # Enable GNN-based graph state representation
 MAX_TASKS_IN_GRAPH = 100  # Maximum number of tasks to include in graph
 
 # GNN encoder configuration (only used when USE_GRAPH_STATE = True)

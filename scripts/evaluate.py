@@ -25,6 +25,7 @@ import torch
 from stable_baselines3 import DQN
 
 from src.environment_real import SchedulingEnvReal
+from src.gnn_encoder import GraphStateWrapper, HeteroGraphEncoder
 import src.constants as c
 
 
@@ -270,7 +271,41 @@ def main():
     # Create environment
     print("[INIT] Creating environment...")
     env = SchedulingEnvReal()
-    print("[OK] Environment created!\n")
+    print("[OK] Environment created!")
+    
+    if hasattr(env, 'use_graph_state') and not getattr(env, 'use_graph_state'):
+        print("[INFO] Enabling graph state mode for evaluation.")
+        env.use_graph_state = True
+    
+    eval_device = 'cuda' if c.INFERENCE_DEVICE == 'cuda' and torch.cuda.is_available() else 'cpu'
+    gnn_output_dim = getattr(c, 'GNN_OUTPUT_DIM', 64)
+    gnn_hidden_dim = getattr(c, 'GNN_HIDDEN_DIM', 64)
+    gnn_layers = getattr(c, 'GNN_NUM_LAYERS', 2)
+    
+    encoder = HeteroGraphEncoder(
+        task_feature_dim=6,
+        edge_feature_dim=6,
+        hidden_dim=gnn_hidden_dim,
+        output_dim=gnn_output_dim,
+        num_layers=gnn_layers
+    )
+    
+    encoder_path = os.path.join(os.path.dirname(args.model), "gnn_encoder.pt")
+    if os.path.exists(encoder_path):
+        state_dict = torch.load(encoder_path, map_location=eval_device)
+        encoder.load_state_dict(state_dict)
+        print(f"[LOAD] Loaded GNN encoder weights from {encoder_path}")
+    else:
+        print("[WARN] GNN encoder weights not found; using randomly initialized encoder.")
+    encoder.eval()
+    
+    env = GraphStateWrapper(
+        env,
+        encoder=encoder,
+        output_dim=gnn_output_dim,
+        device=eval_device
+    )
+    print("[OK] Environment wrapped with GNN encoder.\n")
     
     # Load trained model
     print(f"[LOAD] Loading trained model from {args.model}...")

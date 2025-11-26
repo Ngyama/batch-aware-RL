@@ -11,6 +11,7 @@ import torch.nn.functional as F
 import numpy as np
 from typing import Dict, Optional
 import src.constants as c
+import gymnasium as gym
 
 
 class HeteroGraphEncoder(nn.Module):
@@ -108,17 +109,18 @@ class HeteroGraphEncoder(nn.Module):
         # Encode node features
         task_features = node_features['task']  # [num_tasks, task_feature_dim]
         edge_features = node_features['edge']   # [num_edges, edge_feature_dim]
+        device = task_features.device
         
         # Initial node embeddings
         if task_features.shape[0] > 0:
             task_embeddings = self.task_encoder(task_features)  # [num_tasks, hidden_dim]
         else:
-            task_embeddings = torch.zeros((0, self.hidden_dim), device=task_features.device if task_features.numel() > 0 else torch.device('cpu'))
+            task_embeddings = torch.zeros((0, self.hidden_dim), device=device)
         
         if edge_features.shape[0] > 0:
             edge_embeddings = self.edge_encoder(edge_features)  # [num_edges, hidden_dim]
         else:
-            edge_embeddings = torch.zeros((0, self.hidden_dim), device=edge_features.device if edge_features.numel() > 0 else torch.device('cpu'))
+            edge_embeddings = torch.zeros((0, self.hidden_dim), device=device)
         
         # Graph convolution (message passing)
         # Process queue edges: propagate information along task queue
@@ -150,14 +152,14 @@ class HeteroGraphEncoder(nn.Module):
             task_aggregated = torch.mean(task_embeddings, dim=0)  # [hidden_dim]
             task_aggregated = self.task_aggregator(task_aggregated)  # [hidden_dim]
         else:
-            task_aggregated = torch.zeros(self.hidden_dim, device=task_embeddings.device if task_embeddings.numel() > 0 else torch.device('cpu'))
+            task_aggregated = torch.zeros(self.hidden_dim, device=device)
         
         # Edge aggregation: mean pooling over all edges
         if edge_embeddings.shape[0] > 0:
             edge_aggregated = torch.mean(edge_embeddings, dim=0)  # [hidden_dim]
             edge_aggregated = self.edge_aggregator(edge_aggregated)  # [hidden_dim]
         else:
-            edge_aggregated = torch.zeros(self.hidden_dim, device=edge_embeddings.device if edge_embeddings.numel() > 0 else torch.device('cpu'))
+            edge_aggregated = torch.zeros(self.hidden_dim, device=device)
         
         # Cache edge embeddings for downstream consumers (e.g., node selector)
         self.last_edge_embeddings = edge_embeddings.detach().clone() if edge_embeddings.shape[0] > 0 else None
@@ -304,7 +306,7 @@ class HeteroGraphEncoder(nn.Module):
         return updated_embeddings
 
 
-class GraphStateWrapper:
+class GraphStateWrapper(gym.Wrapper):
     """
     Wrapper to convert graph state environment to vector state for stable-baselines3.
     
@@ -323,7 +325,7 @@ class GraphStateWrapper:
             output_dim: Output dimension of state vector
             device: Device for encoder computation
         """
-        self.env = env
+        super().__init__(env)
         self.device = torch.device(device)
         
         # Create or use provided encoder
@@ -339,9 +341,11 @@ class GraphStateWrapper:
         else:
             self.encoder = encoder.to(self.device)
         
-        # Store original environment properties
-        self.action_space = env.action_space
         self.output_dim = output_dim
+        
+        # Ensure underlying env returns graph state if supported
+        if hasattr(self.env, 'use_graph_state') and not getattr(self.env, 'use_graph_state'):
+            self.env.use_graph_state = True
         
         # Create observation space for encoded state
         from gymnasium import spaces
@@ -361,7 +365,7 @@ class GraphStateWrapper:
             state_vector, edge_embeddings = self._encode_graph(state)
             self._update_last_graph_artifacts(state_vector, edge_embeddings)
         else:
-            state_vector = state
+            state_vector = self._ensure_vector_shape(state)
             self._update_last_graph_artifacts(state_vector, None)
         
         return state_vector, info
@@ -375,7 +379,7 @@ class GraphStateWrapper:
             state_vector, edge_embeddings = self._encode_graph(state)
             self._update_last_graph_artifacts(state_vector, edge_embeddings)
         else:
-            state_vector = state
+            state_vector = self._ensure_vector_shape(state)
             self._update_last_graph_artifacts(state_vector, None)
         
         return state_vector, reward, terminated, truncated, info
@@ -437,6 +441,17 @@ class GraphStateWrapper:
         graph_data_device['num_nodes'] = graph_data['num_nodes']
         
         return graph_data_device
+
+    def _ensure_vector_shape(self, vector: np.ndarray) -> np.ndarray:
+        """Pad or truncate legacy vector states to match output_dim."""
+        vec = np.asarray(vector, dtype=np.float32).flatten()
+        if vec.size == self.output_dim:
+            return vec
+        if vec.size < self.output_dim:
+            padded = np.zeros(self.output_dim, dtype=np.float32)
+            padded[:vec.size] = vec
+            return padded
+        return vec[:self.output_dim]
     
     def close(self):
         """Close wrapped environment."""
