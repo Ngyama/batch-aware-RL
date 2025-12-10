@@ -21,7 +21,8 @@ PERFORMANCE_PROFILE = {
 TASK_TYPES = [
     {'name': 'camera', 'deadline': 0.03, 'arrival_interval': 0.033},  
     {'name': 'radar', 'deadline': 0.02, 'arrival_interval': 0.020},  
-    {'name': 'lidar', 'deadline': 0.05, 'arrival_interval': 0.100} 
+    {'name': 'lidar', 'deadline': 0.05, 'arrival_interval': 0.100},
+    {'name': 'audio', 'deadline': None, 'arrival_interval': None, 'random_deadline_range': (0.1, 0.5), 'random_arrival_range': (0.05, 0.3)}  # Random deadline and arrival for audio
 ]
 NUM_TASK_TYPES = len(TASK_TYPES)
 
@@ -64,6 +65,7 @@ NUM_ACTIONS = len(BATCH_SIZE_OPTIONS) + 1  # +1 for WAIT action
 # SECTION 5: ADAS-SPECIFIC PARAMETERS
 # ================================================================
 IMAGENETTE_PATH = "data/imagenette2"
+SPEECH_COMMANDS_PATH = "data/speech_commands"  # Google Speech Commands Dataset path
 INFERENCE_DEVICE = "cuda"  # "cuda" for GPU, "cpu" for CPU-only
 
 # ================================================================

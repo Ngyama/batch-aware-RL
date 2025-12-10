@@ -11,6 +11,7 @@ import time
 import os
 
 import torch
+import torchaudio
 from torchvision import models, transforms
 from torchvision.datasets import ImageFolder
 from torch.utils.data import DataLoader
@@ -40,11 +41,11 @@ class SchedulingEnvReal(gym.Env):
         self.device = torch.device(c.INFERENCE_DEVICE if torch.cuda.is_available() else "cpu")
         print(f"  - Using device: {self.device}")
         
-        # Load ResNet-18 model
+        # Load ResNet-18 model for image tasks
         print("  - Loading ResNet-18 model...")
-        self.model = models.resnet18(weights=models.ResNet18_Weights.IMAGENET1K_V1)
-        self.model.eval()
-        self.model.to(self.device)
+        self.image_model = models.resnet18(weights=models.ResNet18_Weights.IMAGENET1K_V1)
+        self.image_model.eval()
+        self.image_model.to(self.device)
         
         # Define image preprocessing pipeline
         self.preprocess = transforms.Compose([
@@ -54,23 +55,63 @@ class SchedulingEnvReal(gym.Env):
             transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
         ])
         
-        # Load Imagenette dataset
+        # Load Imagenette dataset for image tasks
         train_path = os.path.join(c.IMAGENETTE_PATH, 'train')
         
         print(f"  - Loading Imagenette dataset from {train_path}...")
-        self.dataset = ImageFolder(root=train_path, transform=self.preprocess)
-        print(f"  - Dataset loaded: {len(self.dataset)} images")
+        self.image_dataset = ImageFolder(root=train_path, transform=self.preprocess)
+        print(f"  - Image dataset loaded: {len(self.image_dataset)} images")
         
-        self.data_loader = DataLoader(self.dataset, batch_size=1, shuffle=True)
-        self.data_iterator = iter(self.data_loader)
+        self.image_data_loader = DataLoader(self.image_dataset, batch_size=1, shuffle=True)
+        self.image_data_iterator = iter(self.image_data_loader)
+        
+        # Load audio model (simple CNN for speech commands)
+        print("  - Loading audio model...")
+        self.audio_model = self._create_audio_model()
+        self.audio_model.eval()
+        self.audio_model.to(self.device)
+        
+        # Load Google Speech Commands Dataset for audio tasks
+        audio_path = c.SPEECH_COMMANDS_PATH
+        print(f"  - Loading Speech Commands dataset from {audio_path}...")
+        try:
+            # Try to load using torchaudio.datasets.SPEECHCOMMANDS
+            from torchaudio.datasets import SPEECHCOMMANDS
+            # Check if dataset exists, if not, prompt user to download
+            if not os.path.exists(audio_path) or len(os.listdir(audio_path)) == 0:
+                print(f"  - [WARN] Speech Commands dataset not found at {audio_path}")
+                print(f"  - [INFO] Please run: python scripts/utils/download_dataset.py --dataset speech_commands")
+                print(f"  - [WARN] Using placeholder audio data (random waveforms) for now")
+                self.audio_dataset = None
+            else:
+                self.audio_dataset = SPEECHCOMMANDS(root=audio_path, download=False, subset='training')
+                print(f"  - Audio dataset loaded: {len(self.audio_dataset)} samples")
+        except Exception as e:
+            # Fallback: create a simple dataset from directory
+            print(f"  - [WARN] Could not load SPEECHCOMMANDS dataset: {e}")
+            print(f"  - [WARN] Using placeholder audio data (random waveforms)")
+            self.audio_dataset = None
+        
+        if self.audio_dataset is not None:
+            self.audio_data_loader = DataLoader(self.audio_dataset, batch_size=1, shuffle=True)
+            self.audio_data_iterator = iter(self.audio_data_loader)
+        else:
+            self.audio_data_loader = None
+            self.audio_data_iterator = None
+        
+        # Backward compatibility: use image_model as default model
+        self.model = self.image_model
         
         # Warmup GPU for consistent timing
         if self.device.type == 'cuda':
             print("  - Warming up GPU...")
-            dummy_input = torch.randn(1, 3, 224, 224).to(self.device)
+            dummy_image = torch.randn(1, 3, 224, 224).to(self.device)
+            dummy_audio = torch.randn(1, 1, 16000).to(self.device)  # 1 second audio at 16kHz
             with torch.no_grad():
                 for _ in range(10):
-                    _ = self.model(dummy_input)
+                    _ = self.image_model(dummy_image)
+                for _ in range(10):
+                    _ = self.audio_model(dummy_audio)
             torch.cuda.synchronize()
         
         print("[Done] Environment initialized successfully!")
@@ -168,14 +209,22 @@ class SchedulingEnvReal(gym.Env):
         # Reset independent arrival times for each task type
         self.next_arrival_times = {}
         for i, task_type in enumerate(self.task_types):
-            # Schedule first arrival for each type with small random offset
-            arrival_delay = task_type['arrival_interval'] + random.uniform(0, task_type['arrival_interval'] * 0.1)
+            # For audio tasks, use random arrival interval
+            if task_type['name'] == 'audio' and 'random_arrival_range' in task_type:
+                min_interval, max_interval = task_type['random_arrival_range']
+                arrival_delay = random.uniform(min_interval, max_interval)
+            else:
+                # For ADAS tasks, use fixed interval with small random offset
+                arrival_delay = task_type['arrival_interval'] + random.uniform(0, task_type['arrival_interval'] * 0.1)
             self.next_arrival_times[i] = self.current_time + arrival_delay
         
         self.last_state_vector = None
         self.last_node_embeddings = None
         
-        self.data_iterator = iter(self.data_loader)
+        # Reset data iterators
+        self.image_data_iterator = iter(self.image_data_loader)
+        if self.audio_data_loader is not None:
+            self.audio_data_iterator = iter(self.audio_data_loader)
         
         # Return state based on mode (graph or vector)
         if self.use_graph_state:
@@ -269,6 +318,37 @@ class SchedulingEnvReal(gym.Env):
         
         return next_state, reward, terminated, truncated, info
 
+    def _create_audio_model(self):
+        """
+        Create a simple CNN model for audio classification (speech commands).
+        This is a lightweight model for inference timing.
+        """
+        class SimpleAudioCNN(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                # Input: 1 channel, 16000 samples (1 second at 16kHz)
+                # Use 1D convolutions for audio
+                self.conv1 = torch.nn.Conv1d(1, 32, kernel_size=80, stride=16)
+                self.conv2 = torch.nn.Conv1d(32, 64, kernel_size=3)
+                self.conv3 = torch.nn.Conv1d(64, 64, kernel_size=3)
+                self.pool = torch.nn.AdaptiveAvgPool1d(1)
+                self.fc = torch.nn.Linear(64, 10)  # 10 classes for speech commands
+                
+            def forward(self, x):
+                # x: [batch, 1, 16000]
+                x = self.conv1(x)
+                x = torch.relu(x)
+                x = self.conv2(x)
+                x = torch.relu(x)
+                x = self.conv3(x)
+                x = torch.relu(x)
+                x = self.pool(x)
+                x = x.view(x.size(0), -1)
+                x = self.fc(x)
+                return x
+        
+        return SimpleAudioCNN()
+
     def _execute_real_batch_dispatch(self, desired_batch_size, edge_node):
         """
         Execute batch dispatch with REAL ResNet-18 inference on specified edge node.
@@ -289,22 +369,51 @@ class SchedulingEnvReal(gym.Env):
         actual_batch_size = min(desired_batch_size, len(self.task_queue))
         batch_tasks = [self.task_queue.popleft() for _ in range(actual_batch_size)]
         
-        # Collect all images in the batch
-        batch_images = [task['image'] for task in batch_tasks]
-        batch_tensor = torch.cat(batch_images, dim=0).to(self.device)
+        # Separate tasks by type (image vs audio)
+        image_tasks = [t for t in batch_tasks if 'image' in t]
+        audio_tasks = [t for t in batch_tasks if 'audio' in t]
         
-        # Perform actual neural network inference and measure time
-        with torch.no_grad():
-            if self.device.type == 'cuda':
-                torch.cuda.synchronize()
+        # Process image tasks if any
+        if image_tasks:
+            batch_images = [task['image'] for task in image_tasks]
+            batch_tensor = torch.cat(batch_images, dim=0).to(self.device)
             
-            start_time = time.perf_counter()
-            outputs = self.model(batch_tensor)  # Real inference!
+            with torch.no_grad():
+                if self.device.type == 'cuda':
+                    torch.cuda.synchronize()
+                
+                start_time = time.perf_counter()
+                outputs = self.image_model(batch_tensor)  # Real image inference!
+                
+                if self.device.type == 'cuda':
+                    torch.cuda.synchronize()
+                
+                end_time = time.perf_counter()
+                processing_time = end_time - start_time
+        else:
+            processing_time = 0.0
+        
+        # Process audio tasks if any
+        if audio_tasks:
+            batch_audios = [task['audio'] for task in audio_tasks]
+            batch_tensor = torch.cat(batch_audios, dim=0).to(self.device)
             
-            if self.device.type == 'cuda':
-                torch.cuda.synchronize()
-            
-            end_time = time.perf_counter()
+            with torch.no_grad():
+                if self.device.type == 'cuda':
+                    torch.cuda.synchronize()
+                
+                start_time = time.perf_counter()
+                outputs = self.audio_model(batch_tensor)  # Real audio inference!
+                
+                if self.device.type == 'cuda':
+                    torch.cuda.synchronize()
+                
+                end_time = time.perf_counter()
+                audio_processing_time = end_time - start_time
+                processing_time += audio_processing_time
+        
+        # If we have both types, use the maximum processing time
+        # (In reality, they might run in parallel, but for simplicity we sum them)
         
         # Measure actual processing time
         processing_time = end_time - start_time
@@ -557,40 +666,99 @@ class SchedulingEnvReal(gym.Env):
         
         Args:
             type_id: Task type ID
-            task_type: Task type dictionary with arrival_interval
+            task_type: Task type dictionary with arrival_interval or random_arrival_range
         """
-        # Use fixed interval for each sensor type (can be extended to Poisson if needed)
-        arrival_delay = task_type['arrival_interval']
+        # For audio tasks, use random arrival interval
+        if task_type['name'] == 'audio' and 'random_arrival_range' in task_type:
+            min_interval, max_interval = task_type['random_arrival_range']
+            arrival_delay = random.uniform(min_interval, max_interval)
+        else:
+            # Use fixed interval for ADAS sensor types
+            arrival_delay = task_type['arrival_interval']
         self.next_arrival_times[type_id] = self.current_time + arrival_delay
 
     def _add_new_task_with_image(self, type_id, task_type):
         """
-        Add a new task to the queue WITH A REAL IMAGE.
+        Add a new task to the queue WITH REAL DATA (image or audio).
         
-        Loads an actual image from Imagenette dataset and assigns the specified task type.
+        Loads actual data from dataset and assigns the specified task type.
         This method is called for each independent sensor arrival.
         
         Args:
             type_id: Task type ID (determined by which sensor is arriving)
             task_type: Task type dictionary with deadline and name
         """
-        try:
-            image, label = next(self.data_iterator)
-        except StopIteration:
-            # Dataset exhausted, restart iterator
-            self.data_iterator = iter(self.data_loader)
-            image, label = next(self.data_iterator)
-        
-        # Create task with real image data and assigned task type
-        new_task = {
-            'arrival_time': self.current_time,
-            'deadline': self.current_time + task_type['deadline'],
-            'task_type': task_type['name'],      # Task type name (e.g., 'camera', 'radar')
-            'task_type_id': type_id,              # Task type ID (0, 1, 2, ...)
-            'task_id': self.stats['total_tasks_arrived'],
-            'image': image,  # Actual image tensor
-            'label': label   # Ground truth label
-        }
+        # Handle audio tasks differently
+        if task_type['name'] == 'audio':
+            # Load audio data
+            if self.audio_data_iterator is None:
+                # Fallback: create dummy audio data if dataset not available
+                audio_data = torch.randn(1, 16000).to(self.device)  # 1 second at 16kHz
+                label = torch.tensor([0])
+            else:
+                try:
+                    waveform, sample_rate, label, speaker_id, utterance_number = next(self.audio_data_iterator)
+                    # Resample to 16kHz if needed and convert to mono
+                    if sample_rate != 16000:
+                        resampler = torchaudio.transforms.Resample(sample_rate, 16000)
+                        waveform = resampler(waveform)
+                    if waveform.shape[0] > 1:
+                        waveform = waveform[0:1]  # Take first channel
+                    # Pad or truncate to 1 second (16000 samples)
+                    if waveform.shape[1] < 16000:
+                        waveform = torch.nn.functional.pad(waveform, (0, 16000 - waveform.shape[1]))
+                    elif waveform.shape[1] > 16000:
+                        waveform = waveform[:, :16000]
+                    audio_data = waveform.to(self.device)
+                except StopIteration:
+                    # Dataset exhausted, restart iterator
+                    self.audio_data_iterator = iter(self.audio_data_loader)
+                    waveform, sample_rate, label, speaker_id, utterance_number = next(self.audio_data_iterator)
+                    if sample_rate != 16000:
+                        resampler = torchaudio.transforms.Resample(sample_rate, 16000)
+                        waveform = resampler(waveform)
+                    if waveform.shape[0] > 1:
+                        waveform = waveform[0:1]
+                    if waveform.shape[1] < 16000:
+                        waveform = torch.nn.functional.pad(waveform, (0, 16000 - waveform.shape[1]))
+                    elif waveform.shape[1] > 16000:
+                        waveform = waveform[:, :16000]
+                    audio_data = waveform.to(self.device)
+            
+            # Random deadline for audio tasks
+            if 'random_deadline_range' in task_type:
+                min_deadline, max_deadline = task_type['random_deadline_range']
+                deadline_offset = random.uniform(min_deadline, max_deadline)
+            else:
+                deadline_offset = 0.3  # Default
+            
+            new_task = {
+                'arrival_time': self.current_time,
+                'deadline': self.current_time + deadline_offset,
+                'task_type': task_type['name'],
+                'task_type_id': type_id,
+                'task_id': self.stats['total_tasks_arrived'],
+                'audio': audio_data,  # Audio waveform tensor
+                'label': label
+            }
+        else:
+            # Handle image tasks (camera, radar, lidar)
+            try:
+                image, label = next(self.image_data_iterator)
+            except StopIteration:
+                # Dataset exhausted, restart iterator
+                self.image_data_iterator = iter(self.image_data_loader)
+                image, label = next(self.image_data_iterator)
+            
+            new_task = {
+                'arrival_time': self.current_time,
+                'deadline': self.current_time + task_type['deadline'],
+                'task_type': task_type['name'],
+                'task_type_id': type_id,
+                'task_id': self.stats['total_tasks_arrived'],
+                'image': image,  # Actual image tensor
+                'label': label
+            }
         
         self.task_queue.append(new_task)
         self.stats['total_tasks_arrived'] += 1

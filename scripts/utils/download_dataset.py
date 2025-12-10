@@ -1,43 +1,38 @@
 import os
+import sys
 import requests
 import tarfile
 from tqdm import tqdm
 
-# --- 配置信息 ---
-# ImageNette数据集的官方下载链接
-DATA_URL = "https://s3.amazonaws.com/fast-ai-imageclas/imagenette2.tgz"
+PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+sys.path.insert(0, PROJECT_ROOT)
 
-# 我们希望将数据存放在项目根目录下的 'data' 文件夹中
-PROJECT_ROOT = os.path.dirname(os.path.abspath(__file__))
+IMAGENETTE_URL = "https://s3.amazonaws.com/fast-ai-imageclas/imagenette2.tgz"
+
 DATA_PATH = os.path.join(PROJECT_ROOT, "data")
 
-# 下载的压缩包保存路径
-ARCHIVE_PATH = os.path.join(DATA_PATH, "imagenette2.tgz")
+IMAGENETTE_ARCHIVE_PATH = os.path.join(DATA_PATH, "imagenette2.tgz")
 
-# 解压后的文件夹最终路径
-EXTRACTED_FOLDER_PATH = os.path.join(DATA_PATH, "imagenette2")
+IMAGENETTE_EXTRACTED_PATH = os.path.join(DATA_PATH, "imagenette2")
 
-# --- 主逻辑 ---
-def download_and_prepare_dataset():
-    """检查、下载并解压数据集到项目文件夹内。"""
+SPEECH_COMMANDS_PATH = os.path.join(DATA_PATH, "speech_commands")
 
-    # 1. 检查数据集是否已经存在，如果存在则无需任何操作
-    if os.path.exists(EXTRACTED_FOLDER_PATH):
-        print(f"数据集已存在于: {EXTRACTED_FOLDER_PATH}")
+def download_imagenette():
+    
+    if os.path.exists(IMAGENETTE_EXTRACTED_PATH):
+        print(f"ImageNette数据集已存在于: {IMAGENETTE_EXTRACTED_PATH}")
         return
 
-    # 2. 如果不存在，则创建 'data' 文件夹
-    print(f"将在 '{DATA_PATH}' 文件夹中准备数据集...")
+    print(f"将在 '{DATA_PATH}' 文件夹中准备ImageNette数据集...")
     os.makedirs(DATA_PATH, exist_ok=True)
 
-    # 3. 下载数据集压缩包，并显示进度条
-    print(f"正在从 {DATA_URL} 下载数据集...")
-    response = requests.get(DATA_URL, stream=True)
-    response.raise_for_status() # 确保请求成功
+    print(f"正在从 {IMAGENETTE_URL} 下载ImageNette数据集...")
+    response = requests.get(IMAGENETTE_URL, stream=True)
+    response.raise_for_status() 
 
     total_size = int(response.headers.get('content-length', 0))
 
-    with open(ARCHIVE_PATH, 'wb') as f, tqdm(
+    with open(IMAGENETTE_ARCHIVE_PATH, 'wb') as f, tqdm(
         desc="下载中",
         total=total_size,
         unit='iB',
@@ -50,17 +45,75 @@ def download_and_prepare_dataset():
 
     print("下载完成。")
 
-    # 4. 解压下载好的 .tgz 文件
     print(f"正在解压文件到: {DATA_PATH}...")
-    with tarfile.open(ARCHIVE_PATH, "r:gz") as tar:
+    with tarfile.open(IMAGENETTE_ARCHIVE_PATH, "r:gz") as tar:
         tar.extractall(path=DATA_PATH)
     print("解压完成。")
 
-    # 5. (可选) 清理下载的压缩包以节省空间
-    os.remove(ARCHIVE_PATH)
-    print(f"已删除压缩包: {ARCHIVE_PATH}")
+    os.remove(IMAGENETTE_ARCHIVE_PATH)
+    print(f"已删除压缩包: {IMAGENETTE_ARCHIVE_PATH}")
 
-    print("\n数据集已准备就绪！")
+    print("\nImageNette数据集已准备就绪！")
+
+
+def download_speech_commands():
+    """下载Google Speech Commands数据集。"""
+    
+    if os.path.exists(SPEECH_COMMANDS_PATH):
+        files = os.listdir(SPEECH_COMMANDS_PATH)
+        if len(files) > 0:
+            print(f"Speech Commands数据集已存在于: {SPEECH_COMMANDS_PATH}")
+            return
+    
+    print(f"正在下载Google Speech Commands数据集到: {SPEECH_COMMANDS_PATH}...")
+    
+    try:
+        import torchaudio
+        from torchaudio.datasets import SPEECHCOMMANDS
+        
+        os.makedirs(SPEECH_COMMANDS_PATH, exist_ok=True)
+        
+        print("开始下载...")
+        dataset = SPEECHCOMMANDS(root=SPEECH_COMMANDS_PATH, download=True, subset='training')
+        print(f"Speech Commands数据集下载完成！共 {len(dataset)} 个样本。")
+        
+    except ImportError:
+        print("[ERROR] 需要安装torchaudio: pip install torchaudio")
+        raise
+    except Exception as e:
+        print(f"[ERROR] 下载Speech Commands数据集时出错: {e}")
+        raise
+
+
+def download_all_datasets():
+    """下载所有需要的数据集。"""
+    print("="*70)
+    print("下载数据集")
+    print("="*70 + "\n")
+    
+    print("[1/2] 下载ImageNette数据集...")
+    download_imagenette()
+    
+    print("\n[2/2] 下载Speech Commands数据集...")
+    download_speech_commands()
+    
+    print("\n" + "="*70)
+    print("所有数据集已准备就绪！")
+    print("="*70)
+
 
 if __name__ == "__main__":
-    download_and_prepare_dataset()
+    import argparse
+    
+    parser = argparse.ArgumentParser(description='下载数据集')
+    parser.add_argument('--dataset', type=str, choices=['imagenette', 'speech_commands', 'all'], 
+                       default='all', help='要下载的数据集')
+    
+    args = parser.parse_args()
+    
+    if args.dataset == 'imagenette':
+        download_imagenette()
+    elif args.dataset == 'speech_commands':
+        download_speech_commands()
+    else:
+        download_all_datasets()

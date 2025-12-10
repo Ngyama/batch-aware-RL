@@ -1,9 +1,5 @@
 """
 State-aware node selection utility.
-
-Provides dot-product based node scoring so the environment can decide
-which edge node should execute the next batch, leveraging the latest
-GNN-encoded state vector when available.
 """
 
 from typing import List, Optional
@@ -27,16 +23,7 @@ class StateAwareNodeSelector:
         state_vector: Optional[np.ndarray],
         node_embeddings: Optional[np.ndarray] = None,
     ):
-        """
-        Select an available edge node.
-
-        Args:
-            edge_nodes: List of edge node dictionaries.
-            current_time: Current environment timestamp.
-            recent_busy_history: Per-node deque of busy flags.
-            recent_processing_times: Per-node deque of processing times.
-            state_vector: Latest encoded state vector (optional).
-        """
+        """Select an available edge node."""
         available_nodes = [node for node in edge_nodes if not node["busy"]]
         if not available_nodes:
             return None

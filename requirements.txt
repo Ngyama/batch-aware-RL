@@ -5,9 +5,10 @@ numpy>=1.24.0,<2.0.0
 
 # PyTorch (CPU version - safer for compatibility)
 # For GPU version, install manually:
-# pip install torch torchvision --index-url https://download.pytorch.org/whl/cu118
+# pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu118
 torch>=2.0.0
 torchvision>=0.15.0
+torchaudio>=2.0.0
 
 # Deep Learning Model
 # (ResNet-18 is included in torchvision)

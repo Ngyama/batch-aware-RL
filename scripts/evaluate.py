@@ -131,7 +131,7 @@ def evaluate_policy(env, policy, num_episodes=10, max_steps_per_episode=1000, po
         while not done and steps < max_steps_per_episode:
             # Get action from policy
             if isinstance(policy, DQN):
-                action, _ = policy.predict(state, deterministic=True)
+                action, _ = policy.predict(state, deterministic=False)
             else:
                 action = policy(state)
             
