@@ -22,7 +22,7 @@ TASK_TYPES = [
     {'name': 'camera', 'deadline': 0.03, 'arrival_interval': 0.033},  
     {'name': 'radar', 'deadline': 0.02, 'arrival_interval': 0.020},  
     {'name': 'lidar', 'deadline': 0.05, 'arrival_interval': 0.100},
-    {'name': 'audio', 'deadline': None, 'arrival_interval': None, 'random_deadline_range': (0.1, 0.5), 'random_arrival_range': (0.05, 0.3)}  # Random deadline and arrival for audio
+    {'name': 'audio', 'deadline': None, 'arrival_interval': None, 'random_deadline_range': (0.1, 0.5), 'random_arrival_range': (0.05, 0.3)}
 ]
 NUM_TASK_TYPES = len(TASK_TYPES)
 
@@ -31,6 +31,9 @@ USE_SINGLE_TASK_TYPE = False
 
 # Simulation step granularity
 SIM_STEP_SECONDS = 0.01
+
+# Maximum episode length (safety limit to prevent infinite episodes)
+MAX_EPISODE_STEPS = 10000  # Maximum steps per episode before truncation
 
 # ================================================================
 # SECTION 3: RL AGENT & TRAINING PARAMETERS

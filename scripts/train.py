@@ -4,6 +4,7 @@ Training Script for Batch-Aware RL Scheduler
 
 import sys
 import os
+os.environ['KMP_DUPLICATE_LIB_OK'] = 'TRUE'
 
 # Add project root to Python path
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
@@ -21,18 +22,35 @@ import src.constants as c
 class TrainingMonitorCallback(BaseCallback):
     """Monitor training progress with additional real environment metrics."""
     
-    def __init__(self, check_freq=5, verbose=1):
+    def __init__(self, check_freq=5, progress_freq=10000, verbose=1):
         super(TrainingMonitorCallback, self).__init__(verbose)
         self.check_freq = check_freq
+        self.progress_freq = progress_freq
         self.episode_rewards = []
         self.episode_lengths = []
         self.episode_stats = []
         self.current_episode_reward = 0
         self.current_episode_length = 0
+        self.last_progress_timestep = 0
     
     def _on_step(self):
         self.current_episode_reward += self.locals['rewards'][0]
         self.current_episode_length += 1
+        
+        # Print progress every progress_freq timesteps
+        current_timestep = self.num_timesteps
+        if current_timestep - self.last_progress_timestep >= self.progress_freq:
+            # Get total timesteps from model if available
+            total_timesteps = None
+            if hasattr(self, 'model') and self.model is not None:
+                total_timesteps = getattr(self.model, 'total_timesteps', None)
+            
+            if total_timesteps:
+                progress_pct = (current_timestep / total_timesteps * 100)
+                print(f"[PROGRESS] Timesteps: {current_timestep:,} / {total_timesteps:,} ({progress_pct:.1f}%) | Episodes: {len(self.episode_rewards)}")
+            else:
+                print(f"[PROGRESS] Timesteps: {current_timestep:,} | Episodes: {len(self.episode_rewards)}")
+            self.last_progress_timestep = current_timestep
         
         if self.locals['dones'][0]:
             info = self.locals['infos'][0]
@@ -144,7 +162,10 @@ def main():
     print("STARTING TRAINING")
     print("="*70 + "\n")
     
-    callback = TrainingMonitorCallback(check_freq=5, verbose=1)
+    callback = TrainingMonitorCallback(check_freq=5, progress_freq=10000, verbose=1)
+    
+    print(f"[INFO] Starting training for {c.TOTAL_TIMESTEPS:,} timesteps...")
+    print(f"[INFO] Progress will be printed every 10,000 timesteps\n")
     
     try:
         model.learn(
@@ -152,8 +173,19 @@ def main():
             callback=callback,
             progress_bar=False
         )
+        
+        # Check actual timesteps completed
+        actual_timesteps = model.num_timesteps
         print("\n" + "="*70)
         print("[DONE] TRAINING COMPLETED")
+        print("="*70)
+        print(f"[INFO] Target timesteps: {c.TOTAL_TIMESTEPS:,}")
+        print(f"[INFO] Actual timesteps: {actual_timesteps:,}")
+        if actual_timesteps < c.TOTAL_TIMESTEPS:
+            print(f"[WARNING] Training stopped early! Missing {c.TOTAL_TIMESTEPS - actual_timesteps:,} timesteps")
+            print(f"[WARNING] Completion: {100 * actual_timesteps / c.TOTAL_TIMESTEPS:.1f}%")
+        else:
+            print(f"[SUCCESS] Training completed successfully!")
         print("="*70 + "\n")
     except KeyboardInterrupt:
         print("\n[WARNING] Training interrupted\n")

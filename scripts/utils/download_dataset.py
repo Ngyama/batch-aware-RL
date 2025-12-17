@@ -18,22 +18,23 @@ IMAGENETTE_EXTRACTED_PATH = os.path.join(DATA_PATH, "imagenette2")
 SPEECH_COMMANDS_PATH = os.path.join(DATA_PATH, "speech_commands")
 
 def download_imagenette():
+    """Download and extract ImageNette dataset."""
     
     if os.path.exists(IMAGENETTE_EXTRACTED_PATH):
-        print(f"ImageNette数据集已存在于: {IMAGENETTE_EXTRACTED_PATH}")
+        print(f"ImageNette dataset already exists at: {IMAGENETTE_EXTRACTED_PATH}")
         return
 
-    print(f"将在 '{DATA_PATH}' 文件夹中准备ImageNette数据集...")
+    print(f"Preparing ImageNette dataset in '{DATA_PATH}' folder...")
     os.makedirs(DATA_PATH, exist_ok=True)
 
-    print(f"正在从 {IMAGENETTE_URL} 下载ImageNette数据集...")
+    print(f"Downloading ImageNette dataset from {IMAGENETTE_URL}...")
     response = requests.get(IMAGENETTE_URL, stream=True)
     response.raise_for_status() 
 
     total_size = int(response.headers.get('content-length', 0))
 
     with open(IMAGENETTE_ARCHIVE_PATH, 'wb') as f, tqdm(
-        desc="下载中",
+        desc="Downloading",
         total=total_size,
         unit='iB',
         unit_scale=True,
@@ -43,29 +44,29 @@ def download_imagenette():
             size = f.write(data)
             bar.update(size)
 
-    print("下载完成。")
+    print("Download completed.")
 
-    print(f"正在解压文件到: {DATA_PATH}...")
+    print(f"Extracting files to: {DATA_PATH}...")
     with tarfile.open(IMAGENETTE_ARCHIVE_PATH, "r:gz") as tar:
         tar.extractall(path=DATA_PATH)
-    print("解压完成。")
+    print("Extraction completed.")
 
     os.remove(IMAGENETTE_ARCHIVE_PATH)
-    print(f"已删除压缩包: {IMAGENETTE_ARCHIVE_PATH}")
+    print(f"Removed archive: {IMAGENETTE_ARCHIVE_PATH}")
 
-    print("\nImageNette数据集已准备就绪！")
+    print("\nImageNette dataset is ready!")
 
 
 def download_speech_commands():
-    """下载Google Speech Commands数据集。"""
+    """Download Google Speech Commands dataset."""
     
     if os.path.exists(SPEECH_COMMANDS_PATH):
         files = os.listdir(SPEECH_COMMANDS_PATH)
         if len(files) > 0:
-            print(f"Speech Commands数据集已存在于: {SPEECH_COMMANDS_PATH}")
+            print(f"Speech Commands dataset already exists at: {SPEECH_COMMANDS_PATH}")
             return
     
-    print(f"正在下载Google Speech Commands数据集到: {SPEECH_COMMANDS_PATH}...")
+    print(f"Downloading Google Speech Commands dataset to: {SPEECH_COMMANDS_PATH}...")
     
     try:
         import torchaudio
@@ -73,41 +74,41 @@ def download_speech_commands():
         
         os.makedirs(SPEECH_COMMANDS_PATH, exist_ok=True)
         
-        print("开始下载...")
+        print("Starting download...")
         dataset = SPEECHCOMMANDS(root=SPEECH_COMMANDS_PATH, download=True, subset='training')
-        print(f"Speech Commands数据集下载完成！共 {len(dataset)} 个样本。")
+        print(f"Speech Commands dataset download completed! Total {len(dataset)} samples.")
         
     except ImportError:
-        print("[ERROR] 需要安装torchaudio: pip install torchaudio")
+        print("[ERROR] torchaudio is required: pip install torchaudio")
         raise
     except Exception as e:
-        print(f"[ERROR] 下载Speech Commands数据集时出错: {e}")
+        print(f"[ERROR] Error downloading Speech Commands dataset: {e}")
         raise
 
 
 def download_all_datasets():
-    """下载所有需要的数据集。"""
+    """Download all required datasets."""
     print("="*70)
-    print("下载数据集")
+    print("DOWNLOADING DATASETS")
     print("="*70 + "\n")
     
-    print("[1/2] 下载ImageNette数据集...")
+    print("[1/2] Downloading ImageNette dataset...")
     download_imagenette()
     
-    print("\n[2/2] 下载Speech Commands数据集...")
+    print("\n[2/2] Downloading Speech Commands dataset...")
     download_speech_commands()
     
     print("\n" + "="*70)
-    print("所有数据集已准备就绪！")
+    print("All datasets are ready!")
     print("="*70)
 
 
 if __name__ == "__main__":
     import argparse
     
-    parser = argparse.ArgumentParser(description='下载数据集')
+    parser = argparse.ArgumentParser(description='Download datasets')
     parser.add_argument('--dataset', type=str, choices=['imagenette', 'speech_commands', 'all'], 
-                       default='all', help='要下载的数据集')
+                       default='all', help='Dataset to download')
     
     args = parser.parse_args()
     

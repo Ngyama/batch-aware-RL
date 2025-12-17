@@ -10,6 +10,9 @@ torch>=2.0.0
 torchvision>=0.15.0
 torchaudio>=2.0.0
 
+# Audio backend for torchaudio (required for loading audio files)
+soundfile>=0.12.0
+
 # Deep Learning Model
 # (ResNet-18 is included in torchvision)
 
