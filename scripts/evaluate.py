@@ -122,8 +122,7 @@ def evaluate_policy(env, policy, num_episodes=10, max_steps_per_episode=1000, po
     episode_lengths = []
     episode_stats = []
     
-    print(f"\n[EVAL] Evaluating {policy_name}...")
-    print(f"   Running {num_episodes} episodes...\n")
+    print(f"\n[EVAL] Evaluating {policy_name} ({num_episodes} episodes)...")
     
     for episode in range(num_episodes):
         state, _ = env.reset()
@@ -132,13 +131,11 @@ def evaluate_policy(env, policy, num_episodes=10, max_steps_per_episode=1000, po
         steps = 0
         
         while not done and steps < max_steps_per_episode:
-            # Get action from policy
             if isinstance(policy, DQN):
                 action, _ = policy.predict(state, deterministic=False)
             else:
                 action = policy(state)
             
-            # Execute action
             state, reward, terminated, truncated, info = env.step(action)
             episode_reward += reward
             steps += 1
@@ -148,15 +145,11 @@ def evaluate_policy(env, policy, num_episodes=10, max_steps_per_episode=1000, po
         episode_lengths.append(steps)
         episode_stats.append(info.get('stats', {}))
         
-        # Print progress
-        stats = info.get('stats', {})
-        success_rate = (stats.get('total_tasks_completed', 0) / 
-                       max(1, stats.get('total_tasks_completed', 0) + stats.get('total_tasks_failed', 0))) * 100
-        
-        print(f"   Episode {episode+1}/{num_episodes}: "
-              f"Reward={episode_reward:.2f}, "
-              f"Steps={steps}, "
-              f"Success={success_rate:.1f}%")
+        if (episode + 1) % 5 == 0 or (episode + 1) == num_episodes:
+            stats = info.get('stats', {})
+            success_rate = (stats.get('total_tasks_completed', 0) / 
+                           max(1, stats.get('total_tasks_completed', 0) + stats.get('total_tasks_failed', 0))) * 100
+            print(f"  Episode {episode+1}/{num_episodes}: reward={episode_reward:.2f}, success rate={success_rate:.1f}%")
     
     # Calculate aggregate metrics
     metrics = {
@@ -180,12 +173,10 @@ def evaluate_policy(env, policy, num_episodes=10, max_steps_per_episode=1000, po
     metrics['success_rate'] = total_completed / max(1, total_completed + total_failed) * 100
     metrics['avg_latency'] = total_latency / max(1, total_completed)
     
-    # Print summary
-    print(f"\n[SUMMARY] {policy_name}:")
-    print(f"   Mean Reward: {metrics['mean_reward']:.2f} ± {metrics['std_reward']:.2f}")
-    print(f"   Success Rate: {metrics['success_rate']:.2f}%")
-    print(f"   Avg Latency: {metrics['avg_latency']*1000:.2f}ms")
-    print(f"   Tasks Completed: {total_completed}/{total_arrived}")
+    print(f"\n[SUMMARY] {policy_name}: "
+          f"mean reward={metrics['mean_reward']:.2f}±{metrics['std_reward']:.2f}, "
+          f"success rate={metrics['success_rate']:.2f}%, "
+          f"avg latency={metrics['avg_latency']*1000:.2f}ms")
     
     return metrics
 
@@ -241,9 +232,6 @@ def plot_comparison(all_metrics, save_path=None):
     
     if save_path:
         plt.savefig(save_path, dpi=300, bbox_inches='tight')
-        print(f"\n[SAVED] Comparison plot saved to: {save_path}")
-    
-    plt.show()
 
 
 def main():
@@ -259,25 +247,12 @@ def main():
     
     args = parser.parse_args()
     
-    print("="*70)
-    print("BATCH-AWARE RL SCHEDULER - EVALUATION")
-    print("="*70)
-    print(f"\nConfiguration:")
-    print(f"  Model: {args.model}")
-    print(f"  Episodes: {args.episodes}")
-    print(f"  Compare Baselines: {args.compare_baselines}")
-    print("="*70 + "\n")
+    print(f"Evaluation config: model={args.model}, episodes={args.episodes}, compare_baselines={args.compare_baselines}\n")
     
-    # Create output directory
     os.makedirs(args.output_dir, exist_ok=True)
     
-    # Create environment
-    print("[INIT] Creating environment...")
     env = SchedulingEnvReal()
-    print("[OK] Environment created!")
-    
     if hasattr(env, 'use_graph_state') and not getattr(env, 'use_graph_state'):
-        print("[INFO] Enabling graph state mode for evaluation.")
         env.use_graph_state = True
     
     eval_device = 'cuda' if c.INFERENCE_DEVICE == 'cuda' and torch.cuda.is_available() else 'cpu'
@@ -295,11 +270,7 @@ def main():
     
     encoder_path = os.path.join(os.path.dirname(args.model), "gnn_encoder.pt")
     if os.path.exists(encoder_path):
-        state_dict = torch.load(encoder_path, map_location=eval_device)
-        encoder.load_state_dict(state_dict)
-        print(f"[LOAD] Loaded GNN encoder weights from {encoder_path}")
-    else:
-        print("[WARN] GNN encoder weights not found; using randomly initialized encoder.")
+        encoder.load_state_dict(torch.load(encoder_path, map_location=eval_device))
     encoder.eval()
     
     env = GraphStateWrapper(
@@ -308,15 +279,11 @@ def main():
         output_dim=gnn_output_dim,
         device=eval_device
     )
-    print("[OK] Environment wrapped with GNN encoder.\n")
     
-    # Load trained model
-    print(f"[LOAD] Loading trained model from {args.model}...")
     try:
         model = DQN.load(args.model, device='auto')
-        print("[OK] Model loaded successfully!\n")
     except Exception as e:
-        print(f"[ERROR] Error loading model: {e}")
+        print(f"[ERROR] Failed to load model: {e}")
         return
     
     # Evaluate trained model
@@ -329,12 +296,8 @@ def main():
     )
     all_metrics.append(rl_metrics)
     
-    # Evaluate baseline policies if requested
     if args.compare_baselines:
-        print("\n" + "="*70)
-        print("EVALUATING BASELINE POLICIES")
-        print("="*70)
-        
+        print("\n[EVAL] Evaluating baseline policies...")
         baselines = [
             (BaselinePolicy.greedy_fill, "Baseline: Greedy Fill"),
             (lambda s: BaselinePolicy.fixed_batch(s, 8), "Baseline: Fixed Batch-8"),
@@ -350,32 +313,24 @@ def main():
             )
             all_metrics.append(baseline_metrics)
     
-    # Print final comparison
-    print("\n" + "="*70)
-    print("FINAL COMPARISON")
-    print("="*70)
-    print(f"{'Policy':<25} {'Mean Reward':<15} {'Success Rate':<15} {'Avg Latency (ms)':<18}")
-    print("-"*70)
+    print("\n[COMPARISON] Final Results:")
+    print(f"{'Policy':<30} {'Mean Reward':<18} {'Success Rate':<15} {'Avg Latency (ms)':<18}")
+    print("-"*80)
     for m in all_metrics:
-        print(f"{m['policy_name']:<25} "
-              f"{m['mean_reward']:>8.2f} ± {m['std_reward']:<5.2f} "
+        print(f"{m['policy_name']:<30} "
+              f"{m['mean_reward']:>8.2f}±{m['std_reward']:<7.2f} "
               f"{m['success_rate']:>12.2f}% "
               f"{m['avg_latency']*1000:>15.2f}")
-    print("="*70 + "\n")
     
-    # Save metrics
     metrics_path = os.path.join(args.output_dir, "evaluation_metrics_real.npz")
     np.savez(metrics_path, metrics=all_metrics)
-    print(f"[SAVED] Metrics saved to: {metrics_path}")
     
-    # Plot comparison if baselines were evaluated
     if args.compare_baselines:
         plot_path = os.path.join(args.output_dir, "comparison_real.png")
         plot_comparison(all_metrics, save_path=plot_path)
     
-    # Clean up
     env.close()
-    print("\n[DONE] Evaluation complete!")
+    print("\n[DONE] Evaluation complete")
 
 
 if __name__ == "__main__":

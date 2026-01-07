@@ -57,7 +57,7 @@ class StateAwareNodeSelector:
         state_vector: np.ndarray,
     ) -> Optional[dict]:
         state_vec = np.asarray(state_vector, dtype=np.float32).flatten()
-        state_slice = state_vec[: node_embeddings.shape[1]]
+        state_slice = state_vec[:node_embeddings.shape[1]]
         best_node = None
         best_score = -np.inf
 
@@ -65,8 +65,7 @@ class StateAwareNodeSelector:
             node_id = node.get("node_id", 0)
             if node_id >= node_embeddings.shape[0]:
                 continue
-            node_vec = node_embeddings[node_id]
-            score = float(np.dot(node_vec, state_slice))
+            score = float(np.dot(node_embeddings[node_id], state_slice))
             if score > best_score:
                 best_score = score
                 best_node = node
@@ -85,20 +84,19 @@ class StateAwareNodeSelector:
             return available_nodes[0]
 
         state_vec = np.asarray(state_vector, dtype=np.float32).flatten()
-
-        best_node = None
+        best_node = available_nodes[0]
         best_score = -np.inf
 
         for node in available_nodes:
             descriptor = self._build_node_descriptor(
                 node, current_time, recent_busy_history, recent_processing_times
             )
-            score = float(np.dot(state_vec[: self.descriptor_dim], descriptor))
+            score = float(np.dot(state_vec[:self.descriptor_dim], descriptor))
             if score > best_score:
                 best_score = score
                 best_node = node
 
-        return best_node or available_nodes[0]
+        return best_node
 
     def _build_node_descriptor(
         self,
@@ -111,11 +109,10 @@ class StateAwareNodeSelector:
         time_until_free = max(0.0, node["free_at_time"] - current_time)
         utilization = self._get_node_utilization(node_id, recent_busy_history, node["busy"])
         avg_processing_time = self._get_node_avg_processing_time(node_id, recent_processing_times)
-        history_ratio = (
-            len(recent_processing_times[node_id]) / max(1, self.history_window)
-            if node_id < len(recent_processing_times)
-            else 0.0
-        )
+        if node_id < len(recent_processing_times):
+            history_ratio = len(recent_processing_times[node_id]) / max(1, self.history_window)
+        else:
+            history_ratio = 0.0
 
         availability = 1.0
         free_time_score = 1.0 / (1.0 + time_until_free)

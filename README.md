@@ -1,47 +1,49 @@
-# Batch-Aware Edge Computing with Reinforcement Learning
+# Batch-Aware RL
 
-**This is a research project** investigating intelligent batch scheduling for edge computing systems using deep reinforcement learning. The project focuses on optimizing task scheduling in ADAS (Advanced Driver Assistance Systems) scenarios where real-time processing requirements must be balanced with computational efficiency.
+**研究项目** - 基于深度强化学习的边缘计算智能批处理调度系统
 
-## Overview
+本项目研究如何利用强化学习优化边缘计算系统中的任务调度，特别是在 ADAS（高级驾驶辅助系统）场景中平衡实时处理需求和计算效率。
 
-This research explores how reinforcement learning can learn optimal batch scheduling strategies to minimize system latency while meeting task deadlines. The system learns when and how to batch tasks for processing on edge computing nodes.
+## 概述
 
-### Key Features
+系统学习最优的批处理调度策略，在满足任务截止时间的同时最小化系统延迟。智能体学会何时以及如何将任务批处理以在边缘计算节点上处理。
 
-- **Real Data Environment**: Uses actual ResNet-18 inference with Imagenette dataset for realistic evaluation
-- **Intelligent Batch Selection**: RL agent learns to choose optimal batch sizes (1, 2, 4, 8, 16, 32, 64)
-- **Real-time Constraints**: Handles task deadlines and queue management
-- **Comprehensive Evaluation**: Includes baseline strategy comparisons
+### 核心特性
 
-## Project Structure
+- **真实数据环境**: 使用 ResNet-18 推理和 Imagenette 数据集进行真实评估
+- **智能批次选择**: RL 智能体学习选择最优批次大小（1, 2, 4, 8, 16, 32, 64）
+- **实时约束**: 处理任务截止时间和队列管理
+- **综合评估**: 包含基线策略对比
+
+## 项目结构
 
 ```
 batch-aware/
-├── src/
-│   ├── environment_real.py     # Real-data Gymnasium env
-│   ├── graph_builder.py        # Heterogeneous graph construction
-│   ├── gnn_encoder.py          # GNN encoder + wrapper
-│   ├── node_selector.py        # State-aware node scoring
-│   └── constants.py            # Centralized configuration
-├── scripts/
-│   ├── train.py                # Training pipeline (vector or graph state)
-│   ├── evaluate.py             # Evaluation + metrics export
-│   └── utils/                  # Dataset download & profiling tools
-├── docs/                       # Design notes (GNN usage, graph spec, flow)
-├── tests/                      # Smoke tests (`test_environments.py`)
-├── data/imagenette2/           # Imagenette dataset (downloaded locally)
-└── results/                    # Checkpoints, metrics, TensorBoard logs
+├── src/                    # 核心代码
+│   ├── environment_real.py    # 真实数据环境
+│   ├── graph_builder.py       # 异构图构建
+│   ├── gnn_encoder.py         # GNN 编码器
+│   ├── node_selector.py       # 节点选择器
+│   └── constants.py           # 配置参数
+├── scripts/                # 脚本
+│   ├── train.py              # 训练脚本
+│   ├── evaluate.py           # 评估脚本
+│   └── utils/                # 工具脚本
+├── docs/                  # 文档
+├── tests/                 # 测试
+├── data/                  # 数据集
+└── results/               # 结果（模型、日志等）
 ```
 
-## Quick Start
+## 快速开始
 
-### 1. Install Dependencies
+### 1. 安装依赖
 
 ```bash
 pip install -r requirements.txt
 ```
 
-### 2. Download Dataset
+### 2. 下载数据集
 
 ```bash
 cd scripts
@@ -49,95 +51,75 @@ python utils/download_dataset.py
 cd ..
 ```
 
-### 3. Train Model
+### 3. 训练模型
 
 ```bash
 python scripts/train.py
 ```
 
-Training uses actual ResNet-18 inference with GPU acceleration:
-- Training time: ~1-2 hours for 100K steps (depends on GPU)
-- Uses real image processing for realistic performance evaluation
+训练使用真实的 ResNet-18 推理和 GPU 加速：
+- 训练时间：100K 步约需 1-2 小时（取决于 GPU）
+- 使用真实图像处理进行性能评估
 
-### 4. Evaluate Models
+### 4. 评估模型
 
 ```bash
-# Evaluate model
-python scripts/evaluate.py --model results/real/dqn_real_100000_steps.zip --episodes 20
+# 评估模型
+python scripts/evaluate.py --model results/real_gnn/dqn_real_gnn_100000_steps.zip --episodes 20
 
-# Compare with baselines
-python scripts/evaluate.py --model results/real/dqn_real_100000_steps.zip --episodes 20 --compare-baselines
+# 与基线策略对比
+python scripts/evaluate.py --model results/real_gnn/dqn_real_gnn_100000_steps.zip --episodes 20 --compare-baselines
 ```
 
-## Configuration
+## 配置
 
-Key parameters live in `src/constants.py`:
+主要参数在 `src/constants.py` 中配置：
 
-- `TASK_TYPES`: Sensor-specific deadline + arrival interval definitions
-- `USE_SINGLE_TASK_TYPE`: Force single-modality workloads for ablation
-- `BATCH_SIZE_OPTIONS`: Discrete batch sizes the agent can dispatch
-- `NUM_EDGE_NODES`: Number of edge devices simulated
-- `USE_GRAPH_STATE` / `GNN_OUTPUT_DIM`: Enable GNN encoder and pick output size
-- `TOTAL_TIMESTEPS`, `LEARNING_RATE`, `BUFFER_SIZE`, `GAMMA`: RL hyperparameters
-- `REWARD_TASK_SUCCESS`, `PENALTY_TASK_MISS`, `LATENCY_PENALTY_COEFF`: reward shaping
+- `TASK_TYPES`: 传感器任务类型定义（截止时间、到达间隔）
+- `BATCH_SIZE_OPTIONS`: 可选择的批次大小
+- `NUM_EDGE_NODES`: 边缘节点数量
+- `USE_GRAPH_STATE`: 是否使用图状态表示
+- `TOTAL_TIMESTEPS`: 训练总步数
+- `LEARNING_RATE`, `GAMMA`: RL 超参数
+- `REWARD_TASK_SUCCESS`, `PENALTY_TASK_MISS`: 奖励函数参数
 
-## Research Directions
+## 结果
 
-### Hyperparameter Optimization
-- Experiment with different reward function weights
-- Test various task arrival patterns and deadlines
-- Compare different RL algorithms (DQN, PPO, A2C)
+训练生成：
+- 模型检查点保存在 `results/` 目录
+- TensorBoard 日志用于可视化
+- 训练统计和评估指标
 
-### Environment Enhancements
-- Add more sophisticated state features
-- Implement dynamic deadline assignment
-- Test with different datasets and models
-
-### Performance Analysis
-- Analyze batch size selection patterns
-- Evaluate robustness under different load conditions
-- Compare with baseline scheduling strategies
-
-## Results
-
-Training generates:
-- Model checkpoints in `results/` directory
-- TensorBoard logs for visualization
-- Training statistics and evaluation metrics
-
-View training progress:
+查看训练进度：
 ```bash
-tensorboard --logdir results/real/tensorboard
+tensorboard --logdir results/real_gnn/tensorboard
 ```
 
-## Documentation
+## 文档
 
-The most up-to-date design notes live under `docs/`:
+详细设计文档位于 `docs/` 目录：
+- `GNN_USAGE.md`: GNN 使用指南
+- `GRAPH_STATE_DESIGN.md`: 图状态设计
+- `SYSTEM_FLOW_CN.md`: 系统流程说明（中文）
 
-- `GNN_USAGE.md`: how to enable graph state + training tips
-- `GRAPH_STATE_DESIGN.md`: node/edge schemas and feature scaling
-- `SYSTEM_FLOW_CN.md`: 中文版数据流向说明（含节点打分链路）
-
-## Research Context
-
-This project investigates the application of reinforcement learning to edge computing scheduling problems, specifically focusing on:
-
-1. **Batch Processing Optimization**: Learning optimal batch sizes for different workload conditions
-2. **Real-time Constraint Handling**: Managing task deadlines while maximizing throughput
-3. **Edge Computing Efficiency**: Balancing latency and computational resource utilization
-
-The research contributes to understanding how RL can improve resource management in time-critical edge computing applications.
-
-## Requirements
+## 系统要求
 
 - Python 3.8+
-- PyTorch (CPU or GPU)
+- PyTorch（支持 CPU 或 GPU）
 - Stable-Baselines3
 - Gymnasium
-- TensorBoard for visualization
+- TensorBoard（用于可视化）
 
-See `requirements.txt` for complete dependency list.
+完整依赖列表见 `requirements.txt`。
 
-## License
+## 研究内容
 
-This is a research project. Please cite appropriately if used in academic work.
+本项目研究强化学习在边缘计算调度问题中的应用，重点关注：
+
+1. **批处理优化**: 学习不同负载条件下的最优批次大小
+2. **实时约束处理**: 在最大化吞吐量的同时管理任务截止时间
+3. **边缘计算效率**: 平衡延迟和计算资源利用率
+
+## 许可证
+
+本项目为研究用途。如在学术工作中使用，请适当引用。

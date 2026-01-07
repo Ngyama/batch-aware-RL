@@ -36,13 +36,9 @@ class SchedulingEnvReal(gym.Env):
         self.observation_space = spaces.Box(low, high, dtype=np.float32)
         
         # Setup neural network model and dataset
-        print("[INIT] Initializing Environment...")
-        
         self.device = torch.device(c.INFERENCE_DEVICE if torch.cuda.is_available() else "cpu")
-        print(f"  - Using device: {self.device}")
         
         # Load ResNet-18 model for image tasks
-        print("  - Loading ResNet-18 model...")
         self.image_model = models.resnet18(weights=models.ResNet18_Weights.IMAGENET1K_V1)
         self.image_model.eval()
         self.image_model.to(self.device)
@@ -57,39 +53,24 @@ class SchedulingEnvReal(gym.Env):
         
         # Load Imagenette dataset for image tasks
         train_path = os.path.join(c.IMAGENETTE_PATH, 'train')
-        
-        print(f"  - Loading Imagenette dataset from {train_path}...")
         self.image_dataset = ImageFolder(root=train_path, transform=self.preprocess)
-        print(f"  - Image dataset loaded: {len(self.image_dataset)} images")
-        
         self.image_data_loader = DataLoader(self.image_dataset, batch_size=1, shuffle=True)
         self.image_data_iterator = iter(self.image_data_loader)
         
         # Load audio model (simple CNN for speech commands)
-        print("  - Loading audio model...")
         self.audio_model = self._create_audio_model()
         self.audio_model.eval()
         self.audio_model.to(self.device)
         
         # Load Google Speech Commands Dataset for audio tasks
         audio_path = c.SPEECH_COMMANDS_PATH
-        print(f"  - Loading Speech Commands dataset from {audio_path}...")
         try:
-            # Try to load using torchaudio.datasets.SPEECHCOMMANDS
             from torchaudio.datasets import SPEECHCOMMANDS
-            # Check if dataset exists, if not, prompt user to download
             if not os.path.exists(audio_path) or len(os.listdir(audio_path)) == 0:
-                print(f"  - [WARN] Speech Commands dataset not found at {audio_path}")
-                print(f"  - [INFO] Please run: python scripts/utils/download_dataset.py --dataset speech_commands")
-                print(f"  - [WARN] Using placeholder audio data (random waveforms) for now")
                 self.audio_dataset = None
             else:
                 self.audio_dataset = SPEECHCOMMANDS(root=audio_path, download=False, subset='training')
-                print(f"  - Audio dataset loaded: {len(self.audio_dataset)} samples")
-        except Exception as e:
-            # Fallback: create a simple dataset from directory
-            print(f"  - [WARN] Could not load SPEECHCOMMANDS dataset: {e}")
-            print(f"  - [WARN] Using placeholder audio data (random waveforms)")
+        except Exception:
             self.audio_dataset = None
         
         if self.audio_dataset is not None:
@@ -99,22 +80,18 @@ class SchedulingEnvReal(gym.Env):
             self.audio_data_loader = None
             self.audio_data_iterator = None
         
-        # Backward compatibility: use image_model as default model
         self.model = self.image_model
         
         # Warmup GPU for consistent timing
         if self.device.type == 'cuda':
-            print("  - Warming up GPU...")
             dummy_image = torch.randn(1, 3, 224, 224).to(self.device)
-            dummy_audio = torch.randn(1, 1, 16000).to(self.device)  # 1 second audio at 16kHz
+            dummy_audio = torch.randn(1, 1, 16000).to(self.device)
             with torch.no_grad():
                 for _ in range(10):
                     _ = self.image_model(dummy_image)
                 for _ in range(10):
                     _ = self.audio_model(dummy_audio)
             torch.cuda.synchronize()
-        
-        print("[Done] Environment initialized successfully!")
         
         # Initialize simulation state
         self.current_time = 0.0
@@ -190,11 +167,10 @@ class SchedulingEnvReal(gym.Env):
         self.episode_steps = 0  # Reset episode step counter
         
         # Reset edge nodes
-        for i, node in enumerate(self.edge_nodes):
+        for node in self.edge_nodes:
             node['busy'] = False
             node['free_at_time'] = 0.0
             node['current_time'] = 0.0
-        # Backward compatibility
         self.edge_node = self.edge_nodes[0]
         
         self.stats = {
@@ -284,12 +260,11 @@ class SchedulingEnvReal(gym.Env):
         self.current_time += c.SIM_STEP_SECONDS
         self.episode_steps += 1
         
-        # Update world state (multi-node support)
+        # Update world state
         for node in self.edge_nodes:
             node['current_time'] = self.current_time
             if node['busy'] and self.current_time >= node['free_at_time']:
                 node['busy'] = False
-        # Backward compatibility
         self.edge_node = self.edge_nodes[0]
         
         # Check for independent task arrivals from each sensor type
@@ -303,9 +278,8 @@ class SchedulingEnvReal(gym.Env):
         expired_penalty = self._remove_expired_tasks()
         reward -= expired_penalty
         
-        # Update history tracking for enhanced state features
+        # Update history tracking
         self.recent_queue_lengths.append(len(self.task_queue))
-        # Track node busy status for each node (multi-node support)
         for i, node in enumerate(self.edge_nodes):
             if i < len(self.recent_node_busy_status):
                 self.recent_node_busy_status[i].append(1.0 if node['busy'] else 0.0)
@@ -422,14 +396,10 @@ class SchedulingEnvReal(gym.Env):
                 audio_processing_time = end_time - start_time
                 processing_time += audio_processing_time
         
-        # If we have both types, use the maximum processing time
-        # (In reality, they might run in parallel, but for simplicity we sum them)
-        
         # Measure actual processing time
-        processing_time = end_time - start_time
         self.stats['total_inference_time'] += processing_time
         
-        # Track processing time for the specific node (multi-node support)
+        # Track processing time for the specific node
         node_id = edge_node.get('node_id', 0)
         if node_id < len(self.recent_processing_times):
             self.recent_processing_times[node_id].append(processing_time)
@@ -535,10 +505,7 @@ class SchedulingEnvReal(gym.Env):
         
         # ============================================================
         # Category 3: Node State (Computing node information)
-        # Note: For multi-node, this aggregates first node's state
-        # For full multi-node support, use _get_graph_state() instead
         # ============================================================
-        # Use first edge node for backward compatibility
         first_node = self.edge_nodes[0]
         time_until_node_free = max(0.0, first_node['free_at_time'] - self.current_time)
         node_busy_status = 1.0 if first_node['busy'] else 0.0
@@ -599,10 +566,8 @@ class SchedulingEnvReal(gym.Env):
         # [RESERVED] multi_node_state: State information if multiple nodes (future)
         
         # ============================================================
-        # Assemble state vector (currently 12 dimensions)
+        # Assemble state vector (12 dimensions)
         # ============================================================
-        # Note: For multi-node, this aggregates first node's state
-        # For full multi-node support, use _get_graph_state() instead
         return np.array([
             # Category 1: Queue State (Features 0-2)
             queue_length,                    # [0]
@@ -616,18 +581,11 @@ class SchedulingEnvReal(gym.Env):
             
             # Category 3: Node State (Features 6, 9-11)
             time_until_node_free,            # [6]
-            # Note: Features 7-8 are in Category 4
+            avg_queue_length_recent,         # [7]
+            recent_success_rate,             # [8]
             node_busy_status,                # [9]
             node_utilization_rate,           # [10]
             node_avg_processing_time,        # [11]
-            
-            # Category 4: Historical Statistics (Features 7-8)
-            avg_queue_length_recent,         # [7]
-            recent_success_rate,             # [8]
-            
-            # Category 5: Future Extensions
-            # Reserved for: task dependencies, multi-node, load prediction, etc.
-            # Will extend state vector when needed
         ], dtype=np.float32)
     
     def _get_graph_state(self):
